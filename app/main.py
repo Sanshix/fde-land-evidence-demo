@@ -29,7 +29,10 @@ STOP = threading.Event()
 
 def actor(request, admin=False):
     origin = request.headers.get("origin")
-    if origin and origin not in {"http://127.0.0.1:8765", "http://localhost:8765"}:
+    allowed_origins = set(
+        os.environ.get("FDE_ALLOWED_ORIGINS", "http://127.0.0.1:8765,http://localhost:8765").split(",")
+    )
+    if origin and origin not in allowed_origins:
         raise HTTPException(403, "拒绝跨站写入")
     identity = getattr(request.state, "identity", None)
     role = identity["role"] if identity else request.headers.get("x-fde-role", "viewer")

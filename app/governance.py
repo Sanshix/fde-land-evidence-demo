@@ -56,6 +56,7 @@ def normalize(key, raw):
     if key == "grade":
         return re.findall(r"[一二三四]级", text) or [text]
     if key == "mode":
+        text = {"随基准地价调整": "随标准调整", "随基准地价标准调整": "随标准调整"}.get(text, text)
         # A menu listing both choices is NOT a selection.
         if "固定" in text and "随标准调整" in text:
             return []
@@ -221,3 +222,36 @@ def validate_citations(doc, body):
         ):
             errors.append(f"{FIELDS.get(key, key)}需精确到原生段落/表格单元格")
     return errors
+
+
+def parse_ocr_text(text, page, profile):
+    """Separate observed OCR protocol markers from visible numeric facts; retain raw output."""
+    lines, seen, markers, repeated = [], set(), 0, 0
+    for index, raw in enumerate(text.splitlines(), 1):
+        clean_line, count = re.subn(r"<\|LOC_\d+\|>", "", raw)
+        markers += count
+        if clean_line in seen:
+            repeated += bool(clean_line.strip())
+            continue
+        seen.add(clean_line)
+        lines.append({"text": clean_line, "raw_text": raw, "locator": f"response/line{index}"})
+    candidates = native_candidates([{"id": page["id"], "native_lines": lines}])
+    for rows in candidates.values():
+        for candidate in rows:
+            candidate.update(
+                kind="ocr",
+                model=profile["model_id"],
+                provider=profile["provider"],
+                score=0,
+                score_meaning="not_provided",
+                source_locator=None,
+                response_locator=candidate["source_locator"],
+                reason="云OCR转录按标签抽取；位置协议标记不当业务数字，重复行去重；未验证原图坐标，需核原件",
+                evidence_status="missing_region",
+            )
+    return candidates, {
+        "parser_version": "ocr-protocol-clean-v2",
+        "location_markers_removed_from_extraction": markers,
+        "duplicate_lines_excluded_from_extraction": repeated,
+        "raw_output_retained": True,
+    }

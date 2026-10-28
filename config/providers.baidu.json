@@ -1,24 +1,27 @@
 {
   "enabled": false,
-  "reason": "已获具体接入授权；真实连接超时，尚无HTTP响应，待恢复网络后启用",
+  "reason": "真实鉴权及单张模拟样张OCR已成功；识别准确率未验收；按需启用且仅允许已授权样张",
   "authorized_scope": "explicit_sample_hash",
   "authorized_sha256": [
     "66c348ee37af7c012d57822dd2d185ea97af984fb57a0e3f5ea945df851738a6"
   ],
   "models": {
     "primary": {
-      "provider": "baidu_qianfan",
-      "base_url": "https://qianfan.baidubce.com/v2/ocr/paddleocr",
-      "model_id": "paddleocr-vl-0.9b",
-      "protocol": "qianfan_ocr",
+      "provider": "baidu_ai_ocr",
+      "base_url": "https://aip.baidubce.com/rest/2.0/brain/online/v2/paddle-vl-parser/task",
+      "model_id": "paddleocr-vl-service",
+      "protocol": "baidu_ocr_oauth",
       "api_key_env": "AI_BAIDU_KEY",
-      "open_weights": true,
+      "open_weights": null,
       "model_card_url": "https://huggingface.co/PaddlePaddle/PaddleOCR-VL",
-      "license": "official model license requires hosted revision confirmation",
+      "license": "服务实际权重版本未返回，不据此认定具体模型版本或许可",
       "authorized": true,
       "identity_verified": false,
       "weight_revision": null,
-      "protocol_status": "mock_tested_live_connect_timeout"
+      "protocol_status": "live_ocr_response_received_not_accuracy_pass",
+      "secret_key_env": "AI_BAIDU_SECRET",
+      "latest_live_test": "runs/cloud-live-20261028T073637Z-baidu/baidu-paddleocr-vl-service.json",
+      "documentation": "https://ai.baidu.com/ai-doc/OCR/3mi73at9o"
     }
   }
 }

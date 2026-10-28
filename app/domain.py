@@ -8,6 +8,7 @@ RULE_VERSION = "exercise-2026-09-30-v1"
 AS_OF = date(2026, 9, 30)
 FIELDS = {
     "contract_no": "合同编号",
+    "contract_type": "合同类型",
     "tenant": "承租人",
     "identity": "证件号码",
     "phone": "联系电话",

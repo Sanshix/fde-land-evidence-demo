@@ -3,6 +3,10 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const technicalLabels={parsed:"提取完成",partial:"部分完成",failed:"解析失败",legacy:"历史资料"};
 const locationLabel=s=>state.fields?.[s]||({document:"整份文书"}[s])||s;
 const labels = {queued:'等待处理',recognizing:'正在提取 / 识别',needs_human:'待人工复核',held:'挂起 · 待补件',published:'已确认发布',withdrawn:'已撤回'};
+const recognitionLabels={unconfigured:'未启用云识别',native_only:'原生结构提取',test_stub:'测试桩（非真实识别）','live-cloud':'云端识别','live-local':'本地识别',resumed_evidence:'复用已完成证据',existing_evidence:'已有证据'};
+const pageDescriptions={inbox:'统一归集租赁材料，跟进识别任务与人工核验进度。',governance:'集中处理识别问题、资料缺失与业务冲突，逐项落实核验。',review:'对照文书原件核验关键事实，保留每一次采纳与修改依据。',ledger:'查看人工确认后的有效宗地快照，追溯核算与发布历史。',measure:'查看实际处理记录、模型调用与规则版本，核验系统运行情况。'};
+const uiIcons={file:'<path d="M5 3h10l4 4v14H5zM14 3v5h5M8 12h8m-8 4h6"/>',pending:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',confirmed:'<path d="m4 12 5 5L20 6"/>',held:'<path d="m12 3 10 18H2L12 3Zm0 6v5m0 3h.01"/>'};
+const uiIcon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true">${uiIcons[name]}</svg>`;
 let state={}, doc=null, draft=null, started=0, dirty=false, citationDetails={}, selectedPayments=[], selectedReliefs=[], governanceRows=[];
 function toast(text){ $('#toast').textContent=text; $('#toast').style.display='block'; setTimeout(()=>$('#toast').style.display='none',6500); }
 async function api(path,body,method){
@@ -14,16 +18,21 @@ async function api(path,body,method){
 }
 async function action(fn){try{return await fn()}catch(error){toast(error.message);return null}}
 function tab(name){
+  SelectControls.close();
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('hidden',x.id!==name));
-  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===name));
+  document.querySelectorAll('nav button').forEach(x=>{x.classList.toggle('active',x.dataset.tab===name);if(x.dataset.tab===name)x.setAttribute('aria-current','page');else x.removeAttribute('aria-current')});
   $('#title').textContent={inbox:'材料与任务',governance:'待核验工作台',review:'证据复核',ledger:'宗地台账',measure:'运行证据'}[name];
+  $('#breadcrumb-current').textContent=$('#title').textContent;
+  $('#page-description').textContent=pageDescriptions[name];
+  window.scrollTo({top:0,behavior:'instant'});
   if(name==='ledger') action(loadLedger); if(name==='governance') action(loadGovernance);
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 async function refresh(){
   state=await api('/api/status');const docs=state.documents;
-  $('#stats').innerHTML=[['材料文书',docs.length],['待核对 / 处理中',docs.filter(x=>!['published','withdrawn','held'].includes(x.state)).length],['已确认',docs.filter(x=>x.state==='published').length],['挂起待补件',docs.filter(x=>x.state==='held').length]].map(([k,v])=>`<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
-  $('#documents').innerHTML=docs.length?`<table><thead><tr><th>档案</th><th>技术 / 业务状态</th><th>证据</th><th></th></tr></thead><tbody>${docs.map(d=>`<tr><td><b>${esc(d.name)}</b><br><small>${esc(d.id)}</small></td><td>${esc(d.intake?.technical_status||'历史记录')} · ${labels[d.state]}<br>${d.pages.length} 个证据单元</td><td>${d.result?`${esc(d.result.mode)} · ${d.result.elapsed_seconds}s · ${d.result.risks.length}项提示`:'尚未完成提取，可人工接管'}</td><td><button data-open="${d.id}">打开复核</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty">尚无材料，导入一份文书开始。</div>';
+  $('#stats').innerHTML=[['材料文书',docs.length,'file','原始文书统一归档'],['待核验 / 处理中',docs.filter(x=>!['published','withdrawn','held'].includes(x.state)).length,'pending','等待处理或人工核验'],['已确认发布',docs.filter(x=>x.state==='published').length,'confirmed','人工确认后进入有效台账'],['挂起待补件',docs.filter(x=>x.state==='held').length,'held','补充材料后继续核验']].map(([k,v,icon,tip])=>`<div class="stat stat-${icon}"><div class="stat-top"><span>${k}</span><div class="stat-icon">${uiIcon(icon)}</div></div><div class="stat-value"><b>${v}</b><span>份</span></div><div class="stat-foot">${tip}</div></div>`).join('');
+  $('#document-count').textContent=`${docs.length} 份文书`;
+  $('#documents').innerHTML=docs.length?`<table><thead><tr><th>档案名称 / 编号</th><th>处理状态</th><th>识别与证据</th><th>操作</th></tr></thead><tbody>${docs.map(d=>`<tr><td><b>${esc(d.name)}</b><br><small>${esc(d.id)}</small></td><td><span class="badge-state state-${esc(d.state)}">${esc(labels[d.state]||d.state)}</span><br><small>${esc(technicalLabels[d.intake?.technical_status]||d.intake?.technical_status||'历史记录')} · ${d.pages.length} 个证据单元</small></td><td>${d.result?`${esc(recognitionLabels[d.result.mode]||d.result.mode)}<br><small>${esc(d.result.elapsed_seconds)} 秒 · ${d.result.risks.length} 项提示</small>`:'<span class="muted">尚未完成提取，可人工接管</span>'}</td><td><button data-open="${d.id}">打开复核 <span aria-hidden="true">→</span></button></td></tr>`).join('')}</tbody></table>`:`<div class="empty">${uiIcon('file')}<span>暂无归档材料</span><small>从上方导入文书，开始识别与证据核验。</small></div>`;
   bindOpenButtons();
   $('#batches').innerHTML=(state.batches||[]).map(b=>`<p><b>${esc(b.label)}</b> · ${b.elapsed_seconds}s · 已发布${b.published}/${b.expected||b.documents} · 挂起${b.held} · 失败${b.failures||0} · ${b.all_published?'全部发布，仍需核对正确性':'整包闭环未完成'}</p>`).join('');
   $('#model-status').textContent='';const pre=document.createElement('pre');pre.textContent=JSON.stringify(state.models,null,2);$('#model-status').append(pre);
@@ -39,6 +48,7 @@ function renderGovernance(){
 }
 $('#refresh-governance').onclick=()=>action(loadGovernance);$('#governance-filter').onchange=renderGovernance;
 $('#refresh').onclick=()=>action(refresh);
+$('#files').onchange=()=>{const files=[...$('#files').files];$('#file-summary').textContent=files.length?`已选择 ${files.length} 个文件 · ${files.map(f=>f.name).join('、')}`:'尚未选择文件'};
 document.querySelectorAll('[data-sample]').forEach(b=>b.onclick=()=>action(async()=>{b.disabled=true;try{const r=await api('/api/sample/'+b.dataset.sample,{});await refresh();await openDoc(r.id);toast(r.duplicate?'已识别重复材料，未重复入账':'已接收；真实模式以运行证据为准')}finally{b.disabled=false}}));
 $('#upload').onsubmit=e=>{e.preventDefault();action(async()=>{const data=new FormData();data.append('name',$('#name').value);for(const f of $('#files').files)data.append('files',f);const r=await api('/api/import',data);await refresh();await openDoc(r.id)})};
 $('#batch-upload').onsubmit=e=>{e.preventDefault();action(async()=>{const data=new FormData();data.append('file',$('#batch-file').files[0]);const r=await api('/api/import-batch',data);toast(r.partial_failure?'部分文件导入失败，已保留成功项':'整包已接收，继续核验');await refresh()})};
@@ -59,7 +69,7 @@ async function openDoc(id){
     const candidates=doc.result?.candidates?.[key]||[];
     return `<div class="field"><div class="field-title"><b>${label}</b><small>${candidates.length} 个候选</small></div><div class="candidates hidden">${candidates.map((c,i)=>`<button class="candidate" data-key="${key}" data-candidate="${i}">${esc(c.value)}<span>${c.kind==='native_extract'?'原生结构提取（非AI分数）':c.kind==='context_suggestion'?'上下文预计值 · 不能当原文':c.score_meaning==='not_provided'?'未提供识别分数':`${Math.round(c.score*100)}%识别分数（非正确概率）`} · ${esc(c.model)}</span><small>原值：${esc(c.raw_value??c.raw_text)}<br>${esc(c.reason)}<br>${esc(c.source_locator||c.source_page_id)}</small></button>`).join('')||'<small>无候选，不能推定事实不存在。</small>'}</div><input data-field="${key}" aria-label="${label}采纳值" value="${esc(saved.fields?.[key]||'')}" placeholder="人工核验后采纳" ${['use','grade','mode'].includes(key)?`list="${{use:'uses',grade:'grades',mode:'modes'}[key]}"`:''}><select data-cite="${key}" aria-label="${label}主要来源"><option value="">请选择证据单元</option>${unitOptions(saved.citations?.[key])}</select><div data-reference-list="${key}" class="references"></div></div>`;
   }).join('');
-  document.querySelectorAll('[data-field]').forEach(e=>{e.oninput=invalidate;e.onfocus=()=>$('#evidence-field').value=e.dataset.field});
+  document.querySelectorAll('[data-field]').forEach(e=>{e.oninput=invalidate;e.onfocus=()=>{$('#evidence-field').value=e.dataset.field;SelectControls.enhance()}});
   document.querySelectorAll('[data-cite]').forEach(e=>e.onchange=()=>{invalidate();if(e.value){$('#evidence-field').value=e.dataset.cite;showPage(e.value)}});
   document.querySelectorAll('[data-candidate]').forEach(b=>b.onclick=()=>{
     const key=b.dataset.key,c=doc.result.candidates[key][+b.dataset.candidate];$(`[data-field="${key}"]`).value=c.value;$(`[data-cite="${key}"]`).value=c.source_page_id;
@@ -86,7 +96,8 @@ function showPage(id,box,locator){
   if(unit.path){$('#original').onload=()=>{const im=$('#original');$('#overlay').setAttribute('viewBox',`0 0 ${im.naturalWidth} ${im.naturalHeight}`);if(box)$('#overlay').innerHTML=`<rect x="${box[0]}" y="${box[1]}" width="${box[2]-box[0]}" height="${box[3]-box[1]}" fill="#efb52c33" stroke="#e69712" stroke-width="5"/>`};$('#original').src=`/api/pages/${doc.id}/${id}?v=${doc.version}`}
   const lines=unit.native_lines||[];$('#native-evidence').classList.toggle('hidden',!lines.length&&!(!unit.path));
   $('#native-evidence').innerHTML=lines.length?`<h3>${esc(unit.name)} · 原生证据</h3><p class="muted">${unit.kind==='native'?'未模拟Word分页；按真实段落/单元格定位。':'PDF文字层与原图并存，请同时核验。'}</p><table><thead><tr><th>原件位置</th><th>原值与显示解释</th><th></th></tr></thead><tbody>${lines.map((l,i)=>`<tr class="${l.locator===locator?'evidence-selected':''}"><td>${esc(l.locator)}${l.hidden?' · 隐藏':''}</td><td><b>${esc(l.raw_text)}</b>${l.display_value!==undefined?`<br><small>显示解释：${esc(l.display_value)} · 格式 ${esc(l.number_format)}<br>XML原值：${esc(l.raw_xml_value)}${l.formula!==null&&l.formula!==undefined?`<br>公式：${esc(l.formula)} · 缓存：${esc(l.cached_value)}`:''}</small>`:''}${l.deleted_text?`<br>删除修订：${esc(l.deleted_text)}`:''}</td><td><button data-native-ref="${i}">引用</button></td></tr>`).join('')}</tbody></table>`:'<div class="error">该原件未能解析。可下载核查并补充受支持格式，不能标为已完成。</div>';
-  document.querySelectorAll('[data-native-ref]').forEach(b=>b.onclick=()=>{const key=$('#evidence-field').value;addReference(key,id,lines[+b.dataset.nativeRef].locator);$(`[data-cite="${key}"]`).value=id;invalidate();toast('已关联原文位置，尚未采纳任何值')});
+  document.querySelectorAll('[data-native-ref]').forEach(b=>b.onclick=()=>{const key=$('#evidence-field').value;addReference(key,id,lines[+b.dataset.nativeRef].locator);$(`[data-cite="${key}"]`).value=id;SelectControls.enhance();invalidate();toast('已关联原文位置，尚未采纳任何值')});
+  SelectControls.enhance();
   $('#native-evidence .evidence-selected')?.scrollIntoView({block:'nearest'});
 }
 $('#show-suggestions').onchange=()=>document.querySelectorAll('.candidates').forEach(e=>e.classList.toggle('hidden',!$('#show-suggestions').checked));
@@ -121,4 +132,5 @@ $('#read-rules').onclick=()=>action(async()=>{const r=await api('/api/rules');$(
 $('#rates-json').oninput=()=>{$('#rule-calculation-clear').checked=false;ruleDraft=null;$('#confirm-rules').disabled=true};
 $('#preview-rules').onclick=()=>action(async()=>{$('#rule-calculation-clear').checked=false;ruleDraft=await api('/api/rules/preview',{rates:JSON.parse($('#rates-json').value)});$('#rule-impact').textContent=JSON.stringify(ruleDraft,null,2);$('#confirm-rules').disabled=false});
 $('#confirm-rules').onclick=()=>action(async()=>{if(!ruleDraft)throw Error('请先预览差异');const r=await api('/api/rules/confirm',{rates:JSON.parse($('#rates-json').value),reason:$('#rule-reason').value,draft_hash:ruleDraft.draft_hash,confirm_calculation:$('#rule-calculation-clear').checked});$('#rule-impact').textContent=JSON.stringify(r,null,2);ruleDraft=null;$('#confirm-rules').disabled=true;toast('新规则和重算已发布，旧通知保持原版本')});
+SelectControls.enhance();
 action(refresh);setInterval(()=>action(refresh),5000);

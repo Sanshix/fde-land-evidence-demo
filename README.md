@@ -121,6 +121,8 @@ SQLite 在线快照 + 原件 + 识别运行证据 + SHA-256 清单。恢复只�
 
 ## 验证与当前边界
 
+界面选择器由 `app/static/controls.js` 在页面内统一渲染，保留原生 `select` 的值、禁用状态和 `input/change` 事件，避免桌面 Chrome 与内置浏览器调用不同的系统菜单。新增动态选择器、更新选项或通过代码修改 `value/disabled` 后，调用 `SelectControls.enhance()` 同步显示；不要从可见文案反推业务值。下拉支持方向键、Home/End、Enter、Escape、Tab 和菜单滚动，视口变化时重定位。
+
 ```sh
 .venv/bin/ruff check app tests scripts/manage.py scripts/build_offline.py
 .venv/bin/pytest -q
@@ -130,3 +132,13 @@ node --check app/static/app.js
 测试使用 synthetic/test_stub 标记的数据。开发10份文书与其余40份留出集分离，不向模型输入标准答案或 scorer 输出。
 
 尚未通过：真实云识别和独立第二模型；开源模型身份核实及练习集实测；全50文书/30宗地逐宗逐年核对；陌生整包20分钟；真实人工耗时；完整13类问题自动发现；全部补档文书类型/争议多情景暂算；正式SSO/TLS；干净目标服务器与离线运行时安装。规则修订目前支持费率表，通用计算政策变更需代码版本。当前界面记录的复核停留时间包含闲置，不当作真实人工净工时。已发布材料修订当前需先撤回；尚未实现旧有效版本与新草稿并存的完整版本树。
+
+
+### 2026-10-28 云端鉴权修正
+
+现有凭据值保持原样，按官方案例调整绑定和协议：
+
+- 阿里读取 `AI_ALIYUN_KEY`，使用新加坡 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`；同一 Key 北京返回 401、新加坡模型列表与 `qwen-vl-ocr-2025-11-20` 图片识别均返回 200。参考[官方地域地址](https://help.aliyun.com/en/model-studio/base-url)与[OCR 示例](https://help.aliyun.com/zh/model-studio/qwen-vl-ocr-api-reference)。
+- 百度现有 `AI_BAIDU_KEY` / `AI_BAIDU_SECRET` 是可用于 AI OCR 的应用凭据：OAuth 换 Token → 表单提交 PaddleOCR-VL 文档解析任务 → 5 秒间隔查询 → 获取 BOS JSON 结果。Token 仅驻留内存；查询超时保留 task_id，不自动重提。参考[官方请求案例](https://ai.baidu.com/ai-doc/OCR/3mi73at9o)。千帆 V2 Bearer 是另一种协议，只应使用独立的 `AI_BAIDU_QIANFAN_API_KEY`。
+
+验证记录：阿里 `runs/cloud-live-20261028T073841Z-aliyun/`；百度 `runs/cloud-live-20261028T073637Z-baidu/`。均使用 LX-017_1 模拟样张，证明调用成功，不代表字段准确率验收。百度未返回实际权重版本，适配器不推断版本、不伪造文字坐标，候选仍须人工核验。两个提供方配置保留按需启用及样张 hash 限制。
