@@ -1,0 +1,47 @@
+{
+  "status": "all_three_live_attempts_connection_timeout_no_model_response",
+  "checked_at": "2026-10-28",
+  "siliconflow": {
+    "base_url": "https://api.siliconflow.cn/v1",
+    "models_endpoint": "https://api.siliconflow.cn/v1/models",
+    "chat_endpoint": "https://api.siliconflow.cn/v1/chat/completions",
+    "proposed_models": [
+      "PaddlePaddle/PaddleOCR-VL-1.5",
+      "Qwen/Qwen3-VL-8B-Instruct"
+    ],
+    "provider_inventory_verified": false,
+    "credential_binding": "explicit_user_approval_2026-10-28T04:59:19Z; only AI_GUIJILIUDONG_SECRET to api.siliconflow.cn",
+    "evidence": [
+      "https://docs.siliconflow.cn/docs/api/chat-completions-post",
+      "https://docs.siliconflow.cn/docs/usercases/use-siliconcloud-in-deepstudent",
+      "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5/blob/main/LICENSE",
+      "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct"
+    ],
+    "weight_license": "Apache-2.0 in official model repositories; exact hosted revision still unverified",
+    "latest_live_test": "runs/cloud-live-20261028T051712Z/siliconflow-inventory.json; ConnectTimeout before model inventory; no OCR call"
+  },
+  "aliyun": {
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "proposed_models": [
+      "qwen-vl-ocr-2025-11-20"
+    ],
+    "region": "Beijing; existing credential region not confirmed",
+    "credential_binding": "explicit exact endpoint and simulated sample approved by user; connection timeout, credential/region not validated",
+    "open_weights": "not_claimed_for_commercial_OCR_model",
+    "evidence": [
+      "https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai",
+      "https://help.aliyun.com/zh/model-studio/qwen-vl-ocr-api-reference"
+    ],
+    "latest_live_test": "runs/cloud-live-20261028T052055Z/aliyun-qwen-vl-ocr-2025-11-20.json"
+  },
+  "baidu_qianfan": {
+    "endpoint": "https://qianfan.baidubce.com/v2/ocr/paddleocr",
+    "model_id": "paddleocr-vl-0.9b",
+    "protocol": "qianfan_ocr_not_chat_completions",
+    "credential_binding": "user_corrected_AI_BAIDU_KEY; exact target/sample explicitly approved; live request ConnectTimeout, auth not validated",
+    "evidence": [
+      "https://cloud.baidu.com/doc/qianfan-api/s/zmho8omz3"
+    ],
+    "latest_live_test": "runs/cloud-live-20261028T052713Z/baidu-paddleocr-vl-0.9b.json"
+  }
+}

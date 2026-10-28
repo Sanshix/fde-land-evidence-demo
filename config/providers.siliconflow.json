@@ -1,0 +1,35 @@
+{
+  "enabled": false,
+  "reason": "硅基流动已获准；2026-10-28 TLS连接超时，暂不自动调用，需排除网络后显式启用",
+  "authorized_scope": "fictional_exercise",
+  "page_budget_seconds": 60,
+  "models": {
+    "primary": {
+      "provider": "siliconflow",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "model_id": "Qwen/Qwen3-VL-8B-Instruct",
+      "api_key_env": "AI_GUIJILIUDONG_SECRET",
+      "authorized": true,
+      "open_weights": true,
+      "license": "Apache-2.0",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct",
+      "weight_revision": null,
+      "identity_verified": false,
+      "protocol_status": "not_live_verified"
+    },
+    "secondary": {
+      "provider": "siliconflow",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "model_id": "PaddlePaddle/PaddleOCR-VL-1.5",
+      "api_key_env": "AI_GUIJILIUDONG_SECRET",
+      "authorized": true,
+      "open_weights": true,
+      "license": "Apache-2.0",
+      "model_card_url": "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.5",
+      "weight_revision": null,
+      "identity_verified": false,
+      "protocol_status": "not_live_verified",
+      "response_format": "ocr_text"
+    }
+  }
+}

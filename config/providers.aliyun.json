@@ -1,0 +1,22 @@
+{
+  "enabled": false,
+  "reason": "已获具体接入授权；真实连接超时，尚无HTTP响应，待恢复网络后启用",
+  "authorized_scope": "explicit_sample_hash",
+  "authorized_sha256": [
+    "66c348ee37af7c012d57822dd2d185ea97af984fb57a0e3f5ea945df851738a6"
+  ],
+  "models": {
+    "primary": {
+      "provider": "aliyun",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model_id": "qwen-vl-ocr-2025-11-20",
+      "response_format": "ocr_text",
+      "api_key_env": "AI_ALIYUN_SECRET",
+      "open_weights": false,
+      "authorized": true,
+      "identity_verified": false,
+      "weight_revision": null,
+      "protocol_status": "mock_tested_live_connect_timeout"
+    }
+  }
+}

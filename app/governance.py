@@ -1,0 +1,223 @@
+"""Source-aware extraction and explicit data quality states; no ground-truth access."""
+
+import hashlib
+import re
+import unicodedata
+from datetime import date
+
+from .domain import FIELDS, clean
+
+ALIASES = {
+    "contract_no": ["合同编号", "合同号"],
+    "tenant": ["承租人", "承租方"],
+    "identity": ["证件号码", "证件号"],
+    "phone": ["联系电话", "联系电话号码"],
+    "parcel_no": ["不动产单元号", "宗地号", "地号"],
+    "address": ["土地坐落", "坐落"],
+    "area": ["土地面积", "面积"],
+    "use": ["土地用途", "用途"],
+    "grade": ["土地级别"],
+    "start": ["租赁起始日", "租赁起始日期"],
+    "end": ["租赁终止日", "租赁终止日期"],
+    "mode": ["计租方式"],
+    "annual": ["年租金（小写）", "年租金(小写)", "年租金小写", "年租金"],
+    "annual_upper": ["年租金（大写）", "年租金(大写)", "年租金大写"],
+    "signed": ["签订日期"],
+}
+
+
+def issue_id(problem):
+    return hashlib.sha256(
+        (
+            problem.get("code", "")
+            + "|"
+            + problem.get("location", "")
+            + "|"
+            + problem.get("message", problem.get("reason", ""))
+        ).encode()
+    ).hexdigest()[:16]
+
+
+def normalize(key, raw):
+    text = unicodedata.normalize("NFKC", str(raw)).strip().strip("：:；;。")
+    if key in {"area", "annual"}:
+        # Preserve signs: turning a source '-120' into '+120' invents a fact.
+        values = re.findall(r"(?<![\d.])[-+−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", text)
+        return [v.replace(",", "").replace("−", "-") for v in values]
+    if key in {"start", "end", "signed"}:
+        m = re.fullmatch(r"(\d{4})[年./-](\d{1,2})[月./-](\d{1,2})日?", text)
+        if m:
+            try:
+                return [date(*map(int, m.groups())).isoformat()]
+            except ValueError:
+                return [text]
+    if key == "use":
+        return [v for v in ["住宅", "商服", "工业", "仓储"] if v in text] or [text]
+    if key == "grade":
+        return re.findall(r"[一二三四]级", text) or [text]
+    if key == "mode":
+        # A menu listing both choices is NOT a selection.
+        if "固定" in text and "随标准调整" in text:
+            return []
+        if text in {"固定", "随标准调整"}:
+            return [text]
+        return []
+    return [text] if text else []
+
+
+def native_candidates(units):
+    out = {k: [] for k in FIELDS}
+    for u in units:
+        lines = u.get("native_lines", [])
+        for index, line in enumerate(lines):
+            raw = line.get("text", "")
+            if line.get("formula") is not None or line.get("hidden") or line.get("tracked_change"):
+                continue  # Visible as evidence but never silently parsed into accepted facts.
+            all_labels = sorted(
+                ((alias, key) for key, aliases in ALIASES.items() for alias in aliases),
+                key=lambda x: -len(x[0]),
+            )
+            found = next(
+                ((alias, key) for alias, key in all_labels if clean(raw).startswith(clean(alias))), None
+            )
+            if not found:
+                continue
+            alias, key = found
+            prefix = re.match(r"^\s*" + r"\s*".join(re.escape(c) for c in alias), raw)
+            if not prefix:
+                continue
+            value = raw[prefix.end() :].strip(":：\t ")
+            normalized_input = value
+            loc = line["locator"]
+            evidence = raw
+            if not value and index + 1 < len(lines):
+                following = lines[index + 1]
+                text = following.get("text", "")
+                if (
+                    following.get("formula") is not None
+                    or following.get("hidden")
+                    or any(clean(text).startswith(clean(a)) for a, _ in all_labels)
+                ):
+                    continue
+                value = text
+                normalized_input = following.get("display_value", text)
+                if (
+                    key in {"start", "end", "signed"}
+                    and following.get("display_status") == "date_interpretation_check_epoch"
+                ):
+                    normalized_input = normalized_input.split("T")[0]
+                loc += " + " + following["locator"]
+                evidence += " | " + text
+            for normalized in normalize(key, normalized_input):
+                if not normalized or re.search(r"【.*?】|待填写|待确认", normalized):
+                    continue
+                out[key].append(
+                    {
+                        "value": normalized,
+                        "raw_text": evidence,
+                        "raw_value": value,
+                        "normalization": "NFKC/explicit date or numeric token only; raw retained",
+                        "source_locator": loc,
+                        "source_page_id": u["id"],
+                        "bbox": None,
+                        "score": 1.0,
+                        "score_meaning": "mechanical_extraction_not_model_confidence",
+                        "kind": "native_extract",
+                        "model": "native-structure-v1",
+                        "provider": "local_parser_no_model",
+                        "reason": "按原生标签/相邻结构提取，内容与业务正确性仍需人核验",
+                        "verified": False,
+                        "can_publish": False,
+                    }
+                )
+    return out
+
+
+def issues_for(doc):
+    issues = []
+    for original in (doc.get("intake") or {}).get("issues", []):
+        issues.append({**original, "category": "原件问题", "id": issue_id(original)})
+    for risk in (doc.get("result") or {}).get("risks", []):
+        category = "业务冲突" if risk.get("code") in {"disagreement", "cross_field_conflict"} else "识别问题"
+        p = {
+            **risk,
+            "location": risk.get("field") or "document",
+            "message": risk.get("reason", ""),
+            "category": category,
+        }
+        p["id"] = issue_id(p)
+        issues.append(p)
+    if doc["state"] in {"queued", "recognizing", "held"}:
+        p = {
+            "code": doc["state"],
+            "location": "document",
+            "message": {
+                "queued": "识别任务未完成",
+                "recognizing": "识别执行中",
+                "held": "已挂起，等待补件/核验",
+            }[doc["state"]],
+            "category": "未完成",
+        }
+        p["id"] = issue_id(p)
+        issues.append(p)
+    if not issues:
+        p = {
+            "code": "human_pending",
+            "location": "document",
+            "message": "技术提取完成仍须人工确认资料完整与业务事实",
+            "category": "待确认",
+        }
+        p["id"] = issue_id(p)
+        issues.append(p)
+    return issues
+
+
+def validate_completeness(doc, body):
+    intake = doc.get("intake") or {}
+    if intake.get("technical_status") == "failed":
+        return ["资料解析失败/不支持，需补件或转换格式；不能标记完整"]
+    errors = []
+    if not body.get("material_complete"):
+        errors.append("请独立核对页/表/单元格与嵌入图清单完整性")
+    if not body.get("confirm_calculation"):
+        errors.append("请完成第二道核算复核，检查逐年依据与缴费归集")
+    pages = {p["id"] for p in doc["pages"]}
+    resolutions = body.get("quality_resolutions", {})
+    for p in intake.get("issues", []):
+        if p.get("severity") != "blocking":
+            continue
+        resolution = resolutions.get(issue_id(p), {})
+        if (
+            resolution.get("decision") not in {"verified_with_evidence", "excluded_with_reason"}
+            or not resolution.get("reason", "").strip()
+            or resolution.get("source_unit") not in pages
+        ):
+            errors.append("需记录证据和处理理由：" + p["message"])
+    return errors
+
+
+def validate_citations(doc, body):
+    pages = {p["id"]: p for p in doc["pages"]}
+    details = body.get("citation_details", {})
+    errors = []
+    for key, value in body.get("fields", {}).items():
+        if not value:
+            continue
+        primary = body.get("citations", {}).get(key)
+        if primary not in pages:
+            errors.append(f"{FIELDS.get(key, key)}缺少有效证据单元")
+            continue
+        refs = details.get(key, [])
+        for ref in refs:
+            page = pages.get(ref.get("unit_id"))
+            if not page:
+                errors.append("引用了当前文书之外的证据")
+                continue
+            loc = ref.get("locator", "")
+            if page.get("native_lines") and loc not in {line["locator"] for line in page["native_lines"]}:
+                errors.append("原生证据位置不在实际段落/单元格清单内")
+        if pages[primary].get("kind") == "native" and not any(
+            r.get("unit_id") == primary and r.get("locator") for r in refs
+        ):
+            errors.append(f"{FIELDS.get(key, key)}需精确到原生段落/表格单元格")
+    return errors

@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "authorized_scope": "fictional_exercise",
+  "authorized_sha256": [],
+  "page_budget_seconds": 60,
+  "document_budget_seconds": 180,
+  "models": {
+    "primary": {"provider": "待确认供应商", "base_url": "", "model_id": "", "api_key_env": "FDE_PRIMARY_API_KEY", "authorized": false, "open_weights": false, "model_card_url": "", "license": "", "weight_revision": "", "identity_verified": false},
+    "secondary": {"provider": "待确认独立第二模型", "base_url": "", "model_id": "", "api_key_env": "FDE_SECONDARY_API_KEY", "authorized": false, "open_weights": false, "model_card_url": "", "license": "", "weight_revision": "", "identity_verified": false},
+    "third": null,
+    "context": null
+  }
+}
