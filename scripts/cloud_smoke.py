@@ -20,7 +20,11 @@ parser.add_argument("--platform", choices=["siliconflow", "aliyun", "baidu"], re
 args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
 source = SAMPLES / "01_合同扫描件/LX-017_1.jpg"
-run = ROOT / "runs" / ("cloud-live-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+run = (
+    ROOT
+    / "runs"
+    / ("cloud-live-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + args.platform)
+)
 run.mkdir(parents=True)
 encoded, _ = image_payload(source)
 base = {
@@ -153,65 +157,34 @@ def silicon():
 
 
 def baidu():
+    from app.baidu_ocr import BaiduOCRError, parse_document
+
     started = time.monotonic()
-    r = {
-        **base,
-        "provider": "baidu_qianfan",
-        "requested_model": "paddleocr-vl-0.9b",
-        "destination_host": "qianfan.baidubce.com",
-    }
+    profile = json.loads((ROOT / "config/providers.baidu.json").read_text())["models"]["primary"]
+    r = {**base, "provider": profile["provider"], "requested_model": profile["model_id"],
+         "destination_host": "aip.baidubce.com", "auth_method": "application_ak_sk_oauth"}
     try:
-        key = credential("AI_BAIDU_KEY", "qianfan.baidubce.com")
-        r["credential_state"] = "user_corrected_AI_BAIDU_KEY; actual_auth_to_be_validated"
-        with httpx.Client(timeout=45, follow_redirects=False, trust_env=False) as client:
-            response = client.post(
-                "https://qianfan.baidubce.com/v2/ocr/paddleocr",
-                headers={"Authorization": "Bearer " + key},
-                json={
-                    "model": "paddleocr-vl-0.9b",
-                    "file": encoded.split(",", 1)[1],
-                    "fileType": 1,
-                    "useDocOrientationClassify": False,
-                    "useDocUnwarping": False,
-                    "useLayoutDetection": True,
-                },
-            )
-        r["http_status"] = response.status_code
-        data = response.json()
-        if response.status_code == 200 and data.get("result"):
-            r.update(
-                status="response_received_not_accuracy_pass",
-                response_id=data.get("id"),
-                raw_response=data["result"],
-                usage=data.get("usage"),
-            )
-        else:
-            error = data.get("error", {})
-            r.update(
-                status="provider_error",
-                error_code=data.get("error_code") or (error.get("code") if isinstance(error, dict) else None),
-            )
-            r["provider_message"] = (
-                data.get("error_msg")
-                or data.get("message")
-                or (error.get("message") if isinstance(error, dict) else None)
-            )
-    except Exception as e:
-        r.update(status="transport_or_configuration_error", error_code=type(e).__name__)
+        result = parse_document(encoded, "LX-017_1.jpg", profile, timeout=90)
+        r.update(status="response_received_not_accuracy_pass", http_status=200,
+                 returned_model=None, response_id=result["response_id"], task_id=result["task_id"],
+                 raw_response=result["document"], http_requests=result["http_requests"])
+    except BaiduOCRError as error:
+        r.update(status="provider_error", error_stage=error.stage, error_code=error.code,
+                 task_id=error.task_id)
+    except Exception as error:
+        r.update(status="transport_or_configuration_error", error_code=type(error).__name__)
     r["elapsed_seconds"] = round(time.monotonic() - started, 3)
-    return save("baidu-paddleocr-vl-0.9b", r)
+    return save("baidu-paddleocr-vl-service", r)
 
 
 if args.platform == "siliconflow":
     silicon()
 elif args.platform == "aliyun":
-    call(
-        "aliyun",
-        "dashscope.aliyuncs.com",
-        "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "qwen-vl-ocr-2025-11-20",
-        "AI_ALIYUN_SECRET",
-    )
+    from urllib.parse import urlparse
+
+    profile = json.loads((ROOT / "config/providers.aliyun.json").read_text())["models"]["primary"]
+    call("aliyun", urlparse(profile["base_url"]).hostname, profile["base_url"],
+         profile["model_id"], profile["api_key_env"])
 elif args.platform == "baidu":
     baidu()
 print(

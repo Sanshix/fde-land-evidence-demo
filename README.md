@@ -73,7 +73,11 @@ FDE_ALLOWED_ORIGINS=http://10.1.2.3:8765 FDE_SAMPLES_DIR=/data/正式导出 ./sc
 **练习集实测（本机开源 OCR）**：`python3 scripts/measure_local_ocr.py`。RapidOCR（PP-OCRv4 ONNX，CPU）+ 条款句式抽取，
 50 份 3.4 秒/份，关键字段唯一且正确率：签订日期 84%、宗地号 80%、计租方式 48%、起止日期约 40%、面积 30%、
 承租人 22%、坐落 0%；**没有一份关键字段全对**。结论：轻量本机 OCR 只能做辅助与离线兜底，全部送人工复核；
-批量确认需要视觉大模型（如 Qwen2.5/3-VL）的实测结果，尚待网络恢复后补测。
+批量确认门槛仍需视觉大模型实测校准；供应商连通记录见下方鉴权修正，连通成功不等于准确率通过。
+
+批量确认要求原件引用可验证且无阻断告警，并须逐份人工核对原件、资料完整性、付款及核算。
+同名弱匹配付款只列候选、不预选，须逐项复核；同一票据不能重复计入不同有效宗地。
+新签/续期草稿按同一组面积、用途、级别和起始日适用标准计算初始年租金，缺标准或方式未定时拒绝生成。
 
 ## 核算口径要点（`app/domain.py`）
 
@@ -90,6 +94,8 @@ FDE_ALLOWED_ORIGINS=http://10.1.2.3:8765 FDE_SAMPLES_DIR=/data/正式导出 ./sc
 
 ## 测试
 
+界面选择器由 `app/static/controls.js` 在页面内统一渲染，保留原生 `select` 的值、禁用状态和 `input/change` 事件，避免桌面 Chrome 与内置浏览器调用不同的系统菜单。新增动态选择器、更新选项或通过代码修改 `value/disabled` 后，调用 `SelectControls.enhance()` 同步显示；不要从可见文案反推业务值。下拉支持方向键、Home/End、Enter、Escape、Tab 和菜单滚动，视口变化时重定位。
+
 ```sh
 .venv/bin/pip install pytest ruff
 .venv/bin/ruff check app tests scripts/manage.py scripts/build_offline.py
@@ -98,6 +104,7 @@ node --check app/static/app.js
 ```
 
 `tests/test_alignment.py` 用练习集标准答案的已确认要素走与 API 相同的归宗 → 缴费候选 → 核算 → 问题清单流程，
+该夹具假定人工已接受所有练习集匹配付款（包含同名弱匹配），并固定使用评分标签“自动通过”，不代表实际批量分流结果。
 再调用出题方 `score.py`：口径取整 96.2 分，`answer_key` 取整 100 分（问题清单 F1 100%、存疑待确认 3/3 文字与金额一致）。
 这验证的是规则引擎；识别准确率另由 `measure_local_ocr.py`/云端实测给出。
 也可手动：`python3 tests/exercise_pipeline.py <练习集>/08_标准答案 out/ && python3 <练习集>/score.py <练习集>/08_标准答案 out/`
@@ -120,4 +127,15 @@ node --check app/static/app.js
 
 ## 审查文档
 
+- [PR #1 修复与复验](docs/PR1修复与复验.md)：四个验收缺陷、主线整合及本轮测试证据。
+
 - [需求对齐与代码审查报告](docs/需求对齐与代码审查报告.md)：22 处缺陷逐条、赛题表 2 对齐矩阵、验证输出，以及待主管部门拍板的口径问题（取整方式、短信通道、税务“本期应缴”）。
+
+### 2026-10-28 云端鉴权修正
+
+现有凭据值保持原样，按官方案例调整绑定和协议：
+
+- 阿里读取 `AI_ALIYUN_KEY`，使用新加坡 `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`；同一 Key 北京返回 401、新加坡模型列表与 `qwen-vl-ocr-2025-11-20` 图片识别均返回 200。参考[官方地域地址](https://help.aliyun.com/en/model-studio/base-url)与[OCR 示例](https://help.aliyun.com/zh/model-studio/qwen-vl-ocr-api-reference)。
+- 百度现有 `AI_BAIDU_KEY` / `AI_BAIDU_SECRET` 是可用于 AI OCR 的应用凭据：OAuth 换 Token → 表单提交 PaddleOCR-VL 文档解析任务 → 5 秒间隔查询 → 获取 BOS JSON 结果。Token 仅驻留内存；查询超时保留 task_id，不自动重提。参考[官方请求案例](https://ai.baidu.com/ai-doc/OCR/3mi73at9o)。千帆 V2 Bearer 是另一种协议，只应使用独立的 `AI_BAIDU_QIANFAN_API_KEY`。
+
+验证记录：阿里 `runs/cloud-live-20261028T073841Z-aliyun/`；百度 `runs/cloud-live-20261028T073637Z-baidu/`。均使用 LX-017_1 模拟样张，证明调用成功，不代表字段准确率验收。百度未返回实际权重版本，适配器不推断版本、不伪造文字坐标，候选仍须人工核验。两个提供方配置保留按需启用及样张 hash 限制。

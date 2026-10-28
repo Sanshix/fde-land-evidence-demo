@@ -237,7 +237,9 @@ def suggest(f, source, extra_fields=()):
         elif clean(p.get("缴款人")) in names:
             reason = "宗地栏空白，缴款人与本宗承租人/权利人同名（弱依据，请核对）"
         if reason:
-            payments.append({**p, "match_basis": reason, "preselect": True})
+            strong = bool(text)
+            payments.append({**p, "match_basis": reason, "match_strength": "strong" if strong else "weak",
+                             "preselect": strong})
     reliefs = [
         x
         for x in source["reliefs"]
@@ -285,6 +287,11 @@ def completeness_hint(doc_type, page_count, has_map):
 def normalize_fields(fields):
     """人工采纳值的格式规范（不改语义）：日期转 ISO（含汉字日期）、去掉“平方米/元/,”、计租方式同义词。"""
     f = {k: (v.strip() if isinstance(v, str) else v) for k, v in dict(fields or {}).items()}
+    if "contract_type" in f:
+        legacy = f.pop("contract_type")
+        if legacy and f.get("doc_type") and legacy != f["doc_type"]:
+            raise ValueError("合同类型的新旧字段不一致，请重新核对")
+        f["doc_type"] = f.get("doc_type") or legacy
     for key in ("start", "end", "signed"):
         if f.get(key):
             f[key] = parse_date(f[key]) or f[key]

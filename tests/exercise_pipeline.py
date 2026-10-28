@@ -76,7 +76,9 @@ def run(answer_dir, out_dir, source=None):
                     "review": {
                         "fields": m["fields"],
                         "evidence_clear": True,
-                        "payment_ids": [str(p["序号"]) for p in matches["payments"] if p.get("preselect")],
+                        # Oracle fixture: assume a reviewer explicitly accepted ALL these candidates,
+                        # including weak name-only matches. This is not batch-confirm eligibility.
+                        "payment_ids": [str(p["序号"]) for p in matches["payments"]],
                         "relief_ids": [r["批准文号"] for r in matches["reliefs"]],
                     },
                 }

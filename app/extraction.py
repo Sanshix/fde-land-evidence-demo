@@ -6,7 +6,7 @@
 
 import re
 
-from .domain import FIELDS, clean, normalize_mode
+from .domain import FIELDS, clean
 
 CN = {**{str(i): i for i in range(10)}, "〇": 0, "○": 0, "O": 0, "o": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 CN_DATE = r"([〇○Oo零一二三四五六七八九0-9]{4})\s*年\s*([一二三四五六七八九十0-9]{1,3})\s*月\s*([一二三四五六七八九十0-9]{1,3})\s*日"
@@ -70,7 +70,7 @@ def prose_candidates(lines, page_id, model, provider, kind="ocr"):
         for line in lines:
             if snippet and snippet[:6] in clean(line["text"]):
                 return line
-        return lines[0] if lines else {}
+        return {}  # Cross-line text without a mapped region must not borrow the first line's box.
 
     def add(key, value, raw, reason="条款句式抽取"):
         value = str(value).strip("：:;,，；。（）()")
@@ -124,10 +124,11 @@ def prose_candidates(lines, page_id, model, provider, kind="ocr"):
         if len(numbers) > 1:
             add("altered_field", "年租金小写", rent.group(0), "同一位置出现多个金额，疑似划改")
             add("altered_before", numbers[0].replace(",", ""), rent.group(0), "疑似划改前的金额")
-    if "不作调整" in text or re.search(r"[☑✓√■]\s*固定", text):
-        add("mode", "固定", "合同期内年租金不作调整" if "不作调整" in text else "固定（勾选）")
-    if re.search(r"[☑✓√■]\s*随", text) or re.search(r"随(?:基准地价|计租标准)调整", text) and "不作调整" not in text:
-        add("mode", normalize_mode("随基准地价调整"), "随基准地价调整")
+    # 模板同时印有两种方式及其解释；条款存在不等于勾选，OCR 丢失勾选符时也不能补选。
+    for pattern, mode in ((r"[☑✓√■]固定", "固定"),
+                          (r"[☑✓√■]随(?:基准地价|计租标准|标准)调整", "随标准调整")):
+        for match in re.finditer(pattern, text):
+            add("mode", mode, match.group(), "检测到勾选字符，仍须核对原图")
     if "变更协议" in text:
         add("doc_type", "变更", "变更协议")
     elif "续签" in text or "续期" in text:

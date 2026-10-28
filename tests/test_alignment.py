@@ -115,7 +115,7 @@ def test_contract_draft_notice_and_tracking(client):  # noqa: F811
     text = zipfile.ZipFile(io.BytesIO(client.get(f"/api/contracts/{draft.json()['id']}/document").content)).read(
         "word/document.xml").decode()
     assert "【" not in text and "原合同（编号：甲字009）期满续签" in text and "2035-12-31" in text
-    assert "壹佰贰拾元整" in text
+    assert "贰拾肆元整" in text  # New lease uses 10 sqm × current 2.4, not the old fixed 120.
     notice = client.post(f"/api/notices/{pub['id']}", json={}, headers=HEAD).json()
     assert "2016至2026" in notice["sms_draft"] and notice["sms"]["segments"] == (2 if notice["sms"]["length"] > 70 else 1)
     assert client.post(f"/api/notices/{notice['id']}/events", json={"status": "已发送"}, headers=HEAD).status_code == 200
@@ -191,7 +191,8 @@ def test_batch_confirm_only_takes_agreed_candidates(client):  # noqa: F811
     good = fields(contract_no="甲字100", doc_type="新签", start="2020-01-01", end="2029-12-31")
 
     def cands(values, models=("model-a", "model-b")):
-        return {k: [{"value": v, "model": m, "source_page_id": page, "raw_text": v, "bbox": [1, 1, 2, 2]}
+        return {k: [{"value": v, "model": m, "source_page_id": page, "raw_text": v, "bbox": [1, 1, 2, 2],
+                     "score": 0.99}
                     for m in models] for k, v in values.items()}
 
     result = {"candidates": cands(good), "risks": [{"field": None, "code": "visual_review", "reason": "x"}]}
@@ -204,8 +205,10 @@ def test_batch_confirm_only_takes_agreed_candidates(client):  # noqa: F811
                                  "risks": []}), single["id"]))
     rows = {r["name"]: r for r in client.get("/api/batch-candidates").json()}
     assert rows["LX-BATCH"]["eligible"] and not rows["LX-SINGLE"]["eligible"]
-    docs = [{"id": r["id"], "version": r["version"]} for r in rows.values()]
-    out = client.post("/api/batch-confirm", json={"documents": docs, "reason": "批量确认", "reviewed_summary": True},
+    docs = [{"id": r["id"], "version": r["version"], "draft_hash": r.get("draft_hash")} for r in rows.values()]
+    out = client.post("/api/batch-confirm", json={"documents": docs, "reason": "批量确认", "reviewed_summary": True,
+                      "evidence_clear": True, "material_complete": True, "confirm_calculation": True,
+                      "confirm_payments": True},
                       headers=HEAD).json()
     assert out["published"] == 1
     archive = zipfile.ZipFile(io.BytesIO(client.get("/api/export").content))

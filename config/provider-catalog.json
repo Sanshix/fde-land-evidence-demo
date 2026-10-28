@@ -1,5 +1,5 @@
 {
-  "status": "all_three_live_attempts_connection_timeout_no_model_response",
+  "status": "aliyun_singapore_and_baidu_ai_ocr_live_success; siliconflow_entry_retains_prior_evidence",
   "checked_at": "2026-10-28",
   "siliconflow": {
     "base_url": "https://api.siliconflow.cn/v1",
@@ -21,27 +21,38 @@
     "latest_live_test": "runs/cloud-live-20261028T051712Z/siliconflow-inventory.json; ConnectTimeout before model inventory; no OCR call"
   },
   "aliyun": {
-    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     "proposed_models": [
       "qwen-vl-ocr-2025-11-20"
     ],
-    "region": "Beijing; existing credential region not confirmed",
-    "credential_binding": "explicit exact endpoint and simulated sample approved by user; connection timeout, credential/region not validated",
+    "region": "Singapore; same key Beijing 401, Singapore models and OCR 200",
+    "credential_binding": "AI_ALIYUN_KEY; existing value unchanged",
     "open_weights": "not_claimed_for_commercial_OCR_model",
     "evidence": [
       "https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai",
       "https://help.aliyun.com/zh/model-studio/qwen-vl-ocr-api-reference"
     ],
-    "latest_live_test": "runs/cloud-live-20261028T052055Z/aliyun-qwen-vl-ocr-2025-11-20.json"
+    "latest_live_test": "runs/cloud-live-20261028T073841Z-aliyun/aliyun-qwen-vl-ocr-2025-11-20.json"
   },
   "baidu_qianfan": {
     "endpoint": "https://qianfan.baidubce.com/v2/ocr/paddleocr",
     "model_id": "paddleocr-vl-0.9b",
     "protocol": "qianfan_ocr_not_chat_completions",
-    "credential_binding": "user_corrected_AI_BAIDU_KEY; exact target/sample explicitly approved; live request ConnectTimeout, auth not validated",
+    "credential_binding": "Existing application AK/SK belong to Baidu AI OCR; do not send as Qianfan V2 Bearer. Qianfan requires AI_BAIDU_QIANFAN_API_KEY.",
     "evidence": [
       "https://cloud.baidu.com/doc/qianfan-api/s/zmho8omz3"
     ],
     "latest_live_test": "runs/cloud-live-20261028T052713Z/baidu-paddleocr-vl-0.9b.json"
+  },
+  "baidu_ai_ocr": {
+    "endpoint": "https://aip.baidubce.com/rest/2.0/brain/online/v2/paddle-vl-parser/task",
+    "protocol": "baidu_ocr_oauth",
+    "credential_binding": "AI_BAIDU_KEY + AI_BAIDU_SECRET -> OAuth access_token in memory",
+    "model_id": "service alias paddleocr-vl-service; hosted revision not returned",
+    "latest_live_test": "runs/cloud-live-20261028T073637Z-baidu/baidu-paddleocr-vl-service.json",
+    "evidence": [
+      "https://ai.baidu.com/ai-doc/OCR/3mi73at9o",
+      "https://cloud.baidu.com/doc/AI_REFERENCE/s/um3zhy50e"
+    ]
   }
 }

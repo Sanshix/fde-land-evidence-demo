@@ -453,7 +453,10 @@ async def preview(identifier, request: Request):
     body = await request.json()
     doc = require_doc(identifier)
     check_version(doc, body)
-    f = normalize_fields(body.get("fields", {}))
+    try:
+        f = normalize_fields(body.get("fields", {}))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     errors = validate_fields(f)
     matches = suggest(f, SOURCE)
     if errors:
@@ -475,7 +478,10 @@ async def preview(identifier, request: Request):
         current = parcel_documents(db, [target, *others] if target else [], identifier)
         previous = store.latest(db, target) if target else None
     try:
-        calculation = calculate_documents(current + [doc], active_source())
+        with store.connection() as db:
+            source = rules.source_for(db, SOURCE)
+            validate_payment_ownership(db, current + [doc], {target, *others}, source)
+            calculation = calculate_documents(current + [doc], source)
     except ValueError as e:
         return {"errors": [str(e)], "matches": matches}
     return {
@@ -501,7 +507,10 @@ async def confirm(identifier, request: Request):
         raise HTTPException(400, "仍有不可辨认字段，禁止靠推理补事实")
     if not body.get("draft_hash"):
         raise HTTPException(400, "请先计算差异预览")
-    f = normalize_fields(body.get("fields", {}))
+    try:
+        f = normalize_fields(body.get("fields", {}))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     errors = validate_fields(f)
     if errors:
         raise HTTPException(400, "；".join(errors))
@@ -553,10 +562,43 @@ async def confirm(identifier, request: Request):
     return publication
 
 
-def prepare_publication(db, doc, fields, identifier):
-    parcel_id, others = parcel_context(db, fields, identifier, create=True)
+def selected_receipts(docs, source):
+    wanted = {str(i) for d in docs for i in (d.get("review") or {}).get("payment_ids", [])}
+    rows = {str(p["序号"]): p for p in source["payments"]}
+    if wanted - rows.keys():
+        raise ValueError("选中的缴费记录已不存在，请重新核对业务来源")
+    return {("receipt", str(rows[i]["票据号"]).strip()) if rows[i].get("票据号")
+            else ("row", i) for i in wanted}
+
+
+def validate_payment_ownership(db, docs, parcel_ids, source):
+    """A receipt may contribute to one active parcel; repeated same-parcel evidence is deduped by compute.
+
+    Called under the publication's BEGIN IMMEDIATE transaction, including batch confirmation.
+    Withdrawing all contributing documents releases the receipt without altering historical snapshots.
+    """
+    receipts = selected_receipts(docs, source)
+    if not receipts:
+        return
+    identifiers = {d["id"] for d in docs}
+    for row in db.execute("SELECT id,name,parcel_id,review FROM documents WHERE state='published'"):
+        if row["id"] in identifiers or follow_parcel(db, row["parcel_id"]) in parcel_ids:
+            continue
+        overlap = receipts & selected_receipts([store.doc_row(row)], source)
+        if overlap:
+            labels = "、".join(key[1] for key in sorted(overlap))
+            raise ValueError(f"票据 {labels} 已归入另一宗地（文书 {row['name']}），禁止重复抵扣；请先核对并撤回错误归集")
+
+
+def prepare_publication(db, doc, fields, identifier, create=True):
+    parcel_id, others = parcel_context(db, fields, identifier)
     current = parcel_documents(db, [parcel_id, *others], identifier)
-    return parcel_id, others, calculate_documents(current + [doc], rules.source_for(db, SOURCE))
+    source = rules.source_for(db, SOURCE)
+    validate_payment_ownership(db, current + [doc], {parcel_id, *others}, source)
+    calculation = calculate_documents(current + [doc], source)
+    if create:
+        parcel_id, others = parcel_context(db, fields, identifier, create=True)
+    return parcel_id, others, calculation
 
 
 def commit_publication(db, doc, old, parcel_id, others, calculation, who, action):
@@ -584,12 +626,42 @@ def commit_publication(db, doc, old, parcel_id, others, calculation, who, action
 @app.get("/api/batch-candidates")
 def batch_candidates():
     rows = []
-    for doc in store.list_docs():
-        if doc["state"] != "needs_human":
-            continue
-        t = triage.triage(doc)
-        rows.append({"id": doc["id"], "name": doc["name"], "version": doc["version"], **t})
+    with store.connection() as db:
+        for row in db.execute("SELECT * FROM documents WHERE state='needs_human' ORDER BY created"):
+            doc = store.doc_row(row)
+            t = batch_candidate(db, doc)
+            t.pop("review", None)
+            rows.append({"id": doc["id"], "name": doc["name"], "version": doc["version"], **t})
     return rows
+
+
+def batch_candidate(db, doc):
+    t = triage.triage(doc)
+    if not t["eligible"]:
+        return t
+    try:
+        target, others = parcel_context(db, t["fields"], doc["id"])
+        siblings = parcel_documents(db, [target, *others], doc["id"])
+        matches = suggest(t["fields"], SOURCE, [d["review"]["fields"] for d in siblings])
+        if matches.get("ambiguous") or any(p.get("match_strength") == "weak" for p in matches["payments"]):
+            raise ValueError("缴费存在同名弱匹配或归宗歧义，须逐项人工核对，不可批量入账")
+        review = {
+            "fields": t["fields"], "citations": t["citations"], "citation_details": t["citation_details"],
+            "evidence_clear": True, "material_complete": True, "confirm_calculation": True,
+            "confirm_payments": True,
+            "payment_ids": [str(p["序号"]) for p in matches["payments"] if p.get("preselect")],
+            "relief_ids": [r["批准文号"] for r in matches["reliefs"]],
+        }
+        candidate = {**doc, "review": review}
+        _, _, calculation = prepare_publication(db, candidate, t["fields"], doc["id"], create=False)
+        if any(i["type"] == "存疑待确认" for i in calculation["issues"]):
+            raise ValueError("存在存疑事项，转人工复核")
+        t.update(review=review, calculation=calculation, matches=matches,
+                 draft_hash=review_hash(candidate, review, calculation))
+    except ValueError as error:
+        t["eligible"] = False
+        t["reasons"].append(str(error))
+    return t
 
 
 @app.post("/api/batch-confirm")
@@ -599,6 +671,9 @@ async def batch_confirm(request: Request):
     body = await request.json()
     if not body.get("reason", "").strip() or not body.get("reviewed_summary"):
         raise HTTPException(400, "批量确认须填写依据并声明已浏览汇总表")
+    if not all(body.get(k) is True for k in
+               ("evidence_clear", "material_complete", "confirm_calculation", "confirm_payments")):
+        raise HTTPException(400, "批量确认仍须逐份核对原件、资料完整性、缴费和核算；不能仅凭模型一致发布")
     results = []
     for item in body.get("documents", [])[:200]:
         identifier = item.get("id")
@@ -608,33 +683,29 @@ async def batch_confirm(request: Request):
             if not doc or doc["version"] != item.get("version"):
                 results.append({"id": identifier, "published": False, "reason": "文书不存在或已变化"})
                 continue
-            t = triage.triage(doc)
+            t = batch_candidate(db, doc)
             if not t["eligible"]:
                 results.append({"id": identifier, "published": False, "reason": "；".join(t["reasons"])})
                 continue
-            matches = suggest(t["fields"], SOURCE)
+            if not item.get("draft_hash") or item["draft_hash"] != t["draft_hash"]:
+                results.append({"id": identifier, "published": False, "reason": "核算或同宗材料已变化，请刷新汇总表并重新核对"})
+                continue
             old = doc["review"]
             doc["review"] = {
-                "fields": t["fields"],
-                "citations": t["citations"],
-                "evidence_clear": True,
-                "material_complete": True,
-                "confirm_calculation": True,
-                "payment_ids": [str(p["序号"]) for p in matches["payments"] if p.get("preselect")],
-                "relief_ids": [r["批准文号"] for r in matches["reliefs"]],
+                **t["review"],
                 "reason": body["reason"][:2000],
                 "actor": who,
                 "at": time.time(),
                 "method": "批量确认",
             }
+            quality_errors = governance.validate_completeness(doc, body) + governance.validate_citations(doc, t["review"])
+            if quality_errors:
+                results.append({"id": identifier, "published": False, "reason": "；".join(quality_errors)})
+                continue
             try:
                 parcel_id, others, calculation = prepare_publication(db, doc, t["fields"], identifier)
             except ValueError as e:
                 results.append({"id": identifier, "published": False, "reason": str(e)})
-                continue
-            doubtful = [i for i in calculation["issues"] if i["type"] == "存疑待确认"]
-            if doubtful:
-                results.append({"id": identifier, "published": False, "reason": "存在存疑事项，转人工复核"})
                 continue
             publication = commit_publication(db, doc, old, parcel_id, others, calculation, who, "batch_confirm")
             results.append({"id": identifier, "published": True, "publication": publication["id"]})
@@ -1029,7 +1100,7 @@ async def contract_draft(request: Request):
     """按制式模板生成新签/续期合同草稿并归档（表2第6项）。年租金由规则程序按现行计租标准计算。"""
     who = actor(request)
     body = await request.json()
-    from .domain import cents, dec, money, to_upper_money
+    from .domain import GRADES, USES, cents, dec, normalize_mode, to_upper_money
     from .outputs import contract_docx
 
     kind = body.get("kind", "续期")
@@ -1052,12 +1123,31 @@ async def contract_draft(request: Request):
         raise HTTPException(400, "请填写新合同起止日期") from e
     if end <= start:
         raise HTTPException(400, "终止日期须晚于起始日期")
-    mode = "随基准地价调整" if f.get("mode") == "随标准调整" else "固定"
-    rates = active_source()["rates"]
-    grade = p.get("ledger", {}).get("土地级别") or f.get("grade")
-    current = [r for r in rates if r["用途"] == f.get("use") and str(r["执行起始日"])[:10] <= start.isoformat()]
-    rate = dec(max(current, key=lambda r: str(r["执行起始日"]))[grade]) if current and grade else None
-    annual = cents(dec(f["area"]) * rate) if rate is not None and mode != "固定" else money(f.get("annual") or 0)
+    try:
+        mode = normalize_mode(f.get("mode"))
+        if mode not in {"固定", "随标准调整"}:
+            raise ValueError("新合同计租方式须明确选择固定或随标准调整")
+        source = active_source()
+        overrides = body.get("fields") or {}
+        grade = overrides.get("grade") or p.get("ledger", {}).get("土地级别") or f.get("grade")
+        area_value = overrides.get("area")
+        if area_value in (None, ""):
+            area_value = p.get("ledger", {}).get("登记面积") or f.get("area")
+        area = dec(area_value)
+        if area <= 0 or grade not in GRADES or f.get("use") not in USES:
+            raise ValueError("新合同须提供有效的面积、用途和土地级别")
+        current = [r for r in source["rates"]
+                   if r["用途"] == f["use"] and str(r["执行起始日"])[:10] <= start.isoformat()]
+        if not current:
+            raise ValueError("新合同起始日无适用计租标准，不能沿用旧租金生成草稿")
+        rate = dec(max(current, key=lambda r: str(r["执行起始日"]))[grade])
+        if rate < 0:
+            raise ValueError("计租标准不能为负数")
+        # 固定与浮动只决定新合同生效后的调整方式；初始年租金均按本次面积和生效标准计算。
+        annual = cents(area * rate)
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, str(e)) from e
+    mode = "随基准地价调整" if mode == "随标准调整" else "固定"
     values = {
         "合同编号": body.get("contract_no") or "（编号待登记）",
         "原合同编号": base.get("contract_no", ""),
@@ -1067,14 +1157,15 @@ async def contract_draft(request: Request):
         "住所": f.get("residence", ""),
         "不动产单元号": p.get("registry_unit") or f.get("parcel_no", ""),
         "坐落": p.get("address") or f.get("address", ""),
-        "土地面积": p.get("ledger", {}).get("登记面积") or f.get("area", ""),
+        "土地面积": str(area),
         "用途": f.get("use", ""),
         "土地级别": grade or "",
         "东至": f.get("east", "　"), "南至": f.get("south", "　"), "西至": f.get("west", "　"), "北至": f.get("north", "　"),
         "起始日期": start.isoformat(),
         "终止日期": end.isoformat(),
         "年限": round(((end - start).days + 1) / 365.25),
-        "年租金标准": str(rate) if rate is not None else f.get("rate_standard", ""),
+        "年租金标准": str(rate),
+        "计租标准版本": source.get("rate_version", "source-unversioned"),
         "年租金小写": str(annual),
         "年租金大写": to_upper_money(annual),
         "计租方式": mode,

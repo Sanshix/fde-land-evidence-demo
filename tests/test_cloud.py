@@ -215,3 +215,76 @@ def test_qianfan_ocr_protocol_and_block_coordinates(cloud):
     assert c["bbox"] == [20, 40, 180, 80] and c["value"] == "10"
     assert c["score_meaning"] == "not_provided" and not c["can_publish"]
     assert result["mode"] == "test_stub" and result["returned_model"] is None
+
+
+def test_multi_page_citations_normalization_and_no_automatic_publication(cloud, tmp_path):
+    from app.cloud_cascade import run_document_cascade
+
+    page, cfg = cloud
+    second = page | {"id": "second-page"}
+    calls = []
+
+    def reply(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        fields = [
+            {
+                "field": "area",
+                "value": "１２３.４５平方米",
+                "raw_text": "面积１２３.４５平方米",
+                "page_id": "test-page",
+                "bbox": [0.1, 0.2, 0.4, 0.3],
+            },
+            {
+                "field": "mode",
+                "value": "随基准地价调整",
+                "raw_text": "勾选随基准地价调整",
+                "page_id": "second-page",
+                "bbox": [0.1, 0.2, 0.4, 0.3],
+            },
+            {"field": "tenant", "value": "invalid", "raw_text": "invalid", "page_id": "not-in-input"},
+        ]
+        return httpx.Response(
+            200,
+            json={
+                "model": "STUB",
+                "choices": [{"message": {"content": json.dumps({"fields": fields, "warnings": []})}}],
+            },
+        )
+
+    result = run_document_cascade(
+        [page, second], tmp_path / "multi", config=cfg, transport=httpx.MockTransport(reply)
+    )
+    c = result["primary"]["candidates"]["area"][0]
+    assert c["raw_value"] == "１２３.４５平方米" and c["value"] == "123.45"
+    assert result["primary"]["candidates"]["mode"][0]["value"] == "随标准调整"
+    assert not result["primary"]["candidates"]["tenant"]
+    assert result["primary"]["rejected"] == [{"field": "tenant", "reason": "unknown_page_id"}]
+    assert result["state"] == "needs_human" and not c["can_publish"]
+    assert len([x for x in calls[0]["messages"][0]["content"] if x["type"] == "image_url"]) == 2
+    count = len(calls)
+    run_document_cascade([page, second], tmp_path / "multi", config=cfg, transport=httpx.MockTransport(reply))
+    assert len(calls) == count
+
+
+def test_ambiguous_numeric_candidate_is_not_silently_selected(cloud):
+    page, cfg = cloud
+    c = parse_reply(
+        {"fields": [{"field": "area", "value": "100或200", "raw_text": "100或200"}]},
+        page,
+        (0, 0, 200, 200),
+        cfg["models"]["primary"],
+    )["area"][0]
+    assert c["value"] == "100或200" and c["raw_value"] == "100或200"
+
+
+def test_ocr_location_protocol_numbers_are_not_area_facts(cloud):
+    from app.providers import parse_ocr_text
+
+    page, cfg = cloud
+    line = "土地面积：１２３.４５平方米<|LOC_120|><|LOC_700|>"
+    candidates, diagnostics = parse_ocr_text(line + "\n" + line, page, cfg["models"]["primary"])
+    assert [c["value"] for c in candidates["area"]] == ["123.45"]
+    assert candidates["area"][0]["bbox"] is None
+    assert diagnostics["location_markers_removed_from_extraction"] == 4
+    assert diagnostics["duplicate_lines_excluded_from_extraction"] == 1

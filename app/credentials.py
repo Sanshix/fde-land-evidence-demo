@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT_KEYS = {
     "AI_GUIJILIUDONG_SECRET",
     "AI_ALIYUN_SECRET",
+    "AI_ALIYUN_KEY",
     "AI_BAIDU_APIID",
     "AI_BAIDU_KEY",
     "AI_BAIDU_SECRET",
@@ -16,8 +17,10 @@ PROJECT_KEYS = {
 BINDINGS = {
     "AI_GUIJILIUDONG_SECRET": "api.siliconflow.cn",
     "AI_ALIYUN_SECRET": "dashscope.aliyuncs.com",
+    "AI_ALIYUN_KEY": ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"),
     "AI_BAIDU_QIANFAN_API_KEY": "qianfan.baidubce.com",
-    "AI_BAIDU_KEY": "qianfan.baidubce.com",
+    "AI_BAIDU_KEY": "aip.baidubce.com",
+    "AI_BAIDU_SECRET": "aip.baidubce.com",
 }
 
 
@@ -38,7 +41,8 @@ def read_project_values():
 
 def credential(name, host):
     if name in BINDINGS:
-        if host != BINDINGS[name]:
+        allowed = BINDINGS[name]
+        if host not in ((allowed,) if isinstance(allowed, str) else allowed):
             raise ValueError("项目凭据与已批准目标域名不匹配")
         value = os.environ.get(name) or read_project_values().get(name)
     elif name.startswith("FDE_"):

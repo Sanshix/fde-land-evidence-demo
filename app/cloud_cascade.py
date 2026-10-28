@@ -68,6 +68,8 @@ def run_cloud_cascade(pages, run_dir, strategy="cascade", budget=180, config=Non
         )
         (run_dir / "result.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
         return out
+    if config.get("document_context") and image_pages:
+        return run_document_cascade(image_pages, run_dir, budget=budget, config=config, transport=transport)
     config_hash = hashlib.sha256(json.dumps(public_status(config), sort_keys=True).encode()).hexdigest()
     for page in image_pages:
         page_start = time.monotonic()
@@ -176,3 +178,124 @@ def run_cloud_cascade(pages, run_dir, strategy="cascade", budget=180, config=Non
     out["budget_exhausted"] = time.monotonic() - started >= budget
     (run_dir / "result.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
     return out
+
+
+def run_document_cascade(pages, run_dir, budget=240, config=None, transport=None):
+    """Multi-page primary + evidence-triggered independent OCR; every result remains unconfirmed."""
+    config = configuration() if config is None else config
+    folder = Path(run_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    primary = model_profile(config, "primary")
+    for page in pages:
+        approved_input(page, config, primary)
+    signature = hashlib.sha256(
+        json.dumps(
+            {
+                "pages": [(p["id"], hashlib.sha256(Path(p["path"]).read_bytes()).hexdigest()) for p in pages],
+                "profiles": public_status(config),
+                "prompt": "multi-page-evidence-v1",
+                "parser": PROMPT_VERSION,
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    primary_path = folder / (signature + "-primary.json")
+    output = {
+        "mode": "test_stub" if transport else "live-cloud",
+        "strategy": "multi_page_then_independent_ocr",
+        "started_at": time.time(),
+        "candidates": {k: [] for k in FIELDS},
+        "pages": [],
+        "events": [],
+        "external_calls": 0,
+        "model_profiles": public_status(config),
+        "third_model": "not_configured",
+        "context_model": "multi_page_primary_not_a_third_model",
+        "cost": None,
+        "cost_note": "usage available; monetary cost unknown until official price/bill verified",
+    }
+    if primary_path.exists():
+        response = json.loads(primary_path.read_text())
+        response["mode"] = "resumed_evidence"
+    else:
+        output["external_calls"] += 0 if transport or is_private_endpoint(primary) else 1
+        response = CloudProvider(primary, transport).identify_document(
+            pages, timeout=min(float(config.get("primary_timeout_seconds", 110)), 180, budget)
+        )
+        primary_path.write_text(json.dumps(response, ensure_ascii=False, indent=2))
+    output["primary"] = response
+    for k, rows in response["candidates"].items():
+        output["candidates"][k].extend(rows)
+    qualities = {p["id"]: quality(p["path"]) for p in pages}
+    primary_risks = assess(response["candidates"], qualities.values())
+    targets = set()
+    for risk in primary_risks:
+        if risk["code"] == "visual_review":
+            continue
+        candidates = response["candidates"].get(risk.get("field"), [])
+        if not candidates:
+            targets.update(p["id"] for p in pages)
+        else:
+            targets.update(c["source_page_id"] for c in candidates)
+    for warning in response.get("warnings", []):
+        identifier = warning.get("page_id") if isinstance(warning, dict) else None
+        if identifier in qualities:
+            targets.add(identifier)
+        else:
+            targets.update(qualities)
+    output["primary_risks"] = primary_risks
+    output["escalation_pages"] = sorted(targets)
+    for page in pages:
+        row = {
+            "id": page["id"],
+            "quality": qualities[page["id"]],
+            "primary_status": "completed_multi_page",
+            "stages": [],
+        }
+        if page["id"] in targets:
+            remain = budget - (time.monotonic() - started)
+            if remain < 2:
+                row["stages"].append({"stage": "secondary", "status": "budget_exhausted"})
+            else:
+                try:
+                    profile = model_profile(config, "secondary")
+                    approved_input(page, config, profile)
+                    if (profile["provider"], profile["model_id"]) == (
+                        primary["provider"],
+                        primary["model_id"],
+                    ):
+                        raise ProviderUnavailable("独立OCR不能使用相同模型身份")
+                    cache = folder / (signature + "-" + page["id"] + "-secondary.json")
+                    if cache.exists():
+                        extra = json.loads(cache.read_text())
+                        extra["mode"] = "resumed_evidence"
+                    else:
+                        output["external_calls"] += 0 if transport or is_private_endpoint(profile) else 1
+                        extra = CloudProvider(profile, transport).identify(page, timeout=min(40, remain))
+                        cache.write_text(json.dumps(extra, ensure_ascii=False, indent=2))
+                    row["stages"].append({"stage": "secondary", "status": "completed", **extra})
+                    for k, rows in extra["candidates"].items():
+                        output["candidates"][k].extend(rows)
+                except Exception as error:
+                    row["stages"].append(
+                        {
+                            "stage": "secondary",
+                            "status": "failed",
+                            "error_type": type(error).__name__,
+                            "reason": str(error)[:200]
+                            if isinstance(error, ValueError)
+                            else type(error).__name__,
+                        }
+                    )
+        else:
+            row["stages"].append({"stage": "secondary", "status": "not_triggered"})
+        output["pages"].append(row)
+        (folder / "checkpoint.json").write_text(json.dumps(output, ensure_ascii=False, indent=2))
+    output.update(
+        risks=assess(output["candidates"], qualities.values()),
+        state="needs_human",
+        elapsed_seconds=round(time.monotonic() - started, 3),
+    )
+    (folder / "result.json").write_text(json.dumps(output, ensure_ascii=False, indent=2))
+    return output
