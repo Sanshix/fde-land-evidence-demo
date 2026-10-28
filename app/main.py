@@ -1,4 +1,3 @@
-import csv
 import hashlib
 import io
 import json
@@ -8,6 +7,7 @@ import threading
 import time
 import zipfile
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -16,10 +16,20 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import auth, governance, intake, rules, store
-from .business import SAMPLES, calculate_documents, ensure_parcel, parcel_key, sources, suggest
+from . import auth, governance, intake, operations, rules, store, triage
+from .business import (
+    SAMPLES,
+    calculate_documents,
+    completeness_hint,
+    ensure_parcel,
+    linked_parcels,
+    normalize_fields,
+    parcel_key,
+    sources,
+    suggest,
+)
 from .cloud_cascade import run_cloud_cascade
-from .domain import FIELDS, validate_fields
+from .domain import DOCUMENT_ATTRIBUTES, FIELDS, validate_fields
 from .providers import public_status
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,13 +37,16 @@ SOURCE = None
 STOP = threading.Event()
 
 
+def allowed_origins():
+    port = os.environ.get("FDE_PORT", "8765")
+    configured = {o.strip().rstrip("/") for o in os.environ.get("FDE_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+    return {f"http://127.0.0.1:{port}", f"http://localhost:{port}"} | configured
+
+
 def actor(request, admin=False):
     origin = request.headers.get("origin")
-    allowed_origins = set(
-        os.environ.get("FDE_ALLOWED_ORIGINS", "http://127.0.0.1:8765,http://localhost:8765").split(",")
-    )
-    if origin and origin not in allowed_origins:
-        raise HTTPException(403, "拒绝跨站写入")
+    if origin and origin.rstrip("/") not in allowed_origins():
+        raise HTTPException(403, "拒绝跨站写入；服务器部署请把访问地址加入 FDE_ALLOWED_ORIGINS")
     identity = getattr(request.state, "identity", None)
     role = identity["role"] if identity else request.headers.get("x-fde-role", "viewer")
     if role not in ({"admin"} if admin else {"reviewer", "admin"}):
@@ -293,6 +306,17 @@ def document(identifier):
         draft = db.execute("SELECT * FROM review_drafts WHERE document_id=?", (identifier,)).fetchone()
         doc["draft"] = json.loads(draft["payload"]) if draft and draft["version"] == doc["version"] else None
         doc["governance_issues"] = governance.issues_for(doc)
+        candidates = (doc.get("result") or {}).get("candidates", {})
+        first = {k: (v[0]["value"] if v else "") for k, v in candidates.items()}
+        image_pages = len([p for p in doc["pages"] if p.get("path")])
+        doc["hints"] = {
+            "missing_pages": completeness_hint(
+                (doc.get("review") or {}).get("fields", {}).get("doc_type") or first.get("doc_type") or "新签",
+                image_pages,
+                (doc.get("review") or {}).get("fields", {}).get("has_map") or first.get("has_map") or "是",
+            ),
+            "image_pages": image_pages,
+        }
         doc["audit"] = [
             dict(r) for r in db.execute("SELECT * FROM audit WHERE target=? ORDER BY id DESC", (identifier,))
         ]
@@ -353,6 +377,13 @@ async def retry(identifier, request: Request):
     check_version(doc, body)
     if doc["state"] in {"published", "withdrawn"}:
         raise HTTPException(409, "已发布/撤回材料不允许直接覆盖识别证据")
+    with store.connection() as db:
+        active = db.execute(
+            "SELECT 1 FROM jobs WHERE document_id=? AND state IN ('queued','running')", (identifier,)
+        ).fetchone()
+    if active:
+        # 否则版本号被抬高、运行中的任务结果被丢弃，文书会永久停在“等待处理”
+        raise HTTPException(409, "识别任务尚在排队或执行，请等待完成后再重新识别")
     strategy = body.get("strategy", "cascade")
     if strategy not in {"cascade", "primary"}:
         raise HTTPException(400, "未知识别策略")
@@ -422,11 +453,18 @@ async def preview(identifier, request: Request):
     body = await request.json()
     doc = require_doc(identifier)
     check_version(doc, body)
-    f = body.get("fields", {})
+    try:
+        f = normalize_fields(body.get("fields", {}))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     errors = validate_fields(f)
     matches = suggest(f, SOURCE)
     if errors:
         return {"errors": errors, "matches": matches}
+    with store.connection() as db:
+        target, others = parcel_context(db, f, identifier)
+        siblings = parcel_documents(db, [target, *others] if target else [], identifier)
+    matches = suggest(f, SOURCE, [d["review"]["fields"] for d in siblings])
     doc["review"] = {
         "fields": f,
         "evidence_clear": True,
@@ -436,22 +474,14 @@ async def preview(identifier, request: Request):
         "stop": body.get("stop", ""),
     }
     with store.connection() as db:
-        key = parcel_key(f, SOURCE)
-        parcel = db.execute("SELECT id FROM parcels WHERE business_key=?", (key,)).fetchone()
-        current = (
-            [
-                store.doc_row(r)
-                for r in db.execute(
-                    "SELECT * FROM documents WHERE parcel_id=? AND state='published' AND id<>?",
-                    (parcel[0], identifier),
-                )
-            ]
-            if parcel
-            else []
-        )
-        previous = store.latest(db, parcel[0]) if parcel else None
+        target, others = parcel_context(db, f, identifier)
+        current = parcel_documents(db, [target, *others] if target else [], identifier)
+        previous = store.latest(db, target) if target else None
     try:
-        calculation = calculate_documents(current + [doc], active_source())
+        with store.connection() as db:
+            source = rules.source_for(db, SOURCE)
+            validate_payment_ownership(db, current + [doc], {target, *others}, source)
+            calculation = calculate_documents(current + [doc], source)
     except ValueError as e:
         return {"errors": [str(e)], "matches": matches}
     return {
@@ -477,7 +507,10 @@ async def confirm(identifier, request: Request):
         raise HTTPException(400, "仍有不可辨认字段，禁止靠推理补事实")
     if not body.get("draft_hash"):
         raise HTTPException(400, "请先计算差异预览")
-    f = body.get("fields", {})
+    try:
+        f = normalize_fields(body.get("fields", {}))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     errors = validate_fields(f)
     if errors:
         raise HTTPException(400, "；".join(errors))
@@ -496,7 +529,7 @@ async def confirm(identifier, request: Request):
         if quality_errors:
             raise HTTPException(400, "；".join(quality_errors))
         valid_pages = {p["id"] for p in doc["pages"]}
-        if any(citations.get(k) not in valid_pages for k in f if f[k]):
+        if any(citations.get(k) not in valid_pages for k in f if f[k] and k not in DOCUMENT_ATTRIBUTES):
             raise HTTPException(400, "每个非空采纳字段必须关联原件页")
         old = doc["review"]
         doc["review"] = {
@@ -518,35 +551,165 @@ async def confirm(identifier, request: Request):
             "review_elapsed_seconds": body.get("review_elapsed_seconds"),
             "method": "人工复核",
         }
-        key = parcel_key(f, SOURCE)
-        parcel_id = ensure_parcel(db, key)
-        current = [
-            store.doc_row(r)
-            for r in db.execute(
-                "SELECT * FROM documents WHERE parcel_id=? AND state='published' AND id<>?",
-                (parcel_id, identifier),
-            )
-        ]
         try:
-            calculation = calculate_documents(current + [doc], rules.source_for(db, SOURCE))
+            parcel_id, others, calculation = prepare_publication(db, doc, f, identifier)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         digest = review_hash(doc, body, calculation)
         if digest != body["draft_hash"]:
             raise HTTPException(409, "核算输入或同宗材料发生变化，请重新预览")
-        db.execute(
-            "UPDATE documents SET review=?,parcel_id=?,state='published',version=version+1,updated=? WHERE id=?",
-            (store.dumps(doc["review"]), parcel_id, time.time(), identifier),
-        )
-        store.audit(
-            db,
-            who,
-            "human_confirm",
-            identifier,
-            {"before": old, "after": doc["review"], "model_run_at": (doc["result"] or {}).get("started_at")},
-        )
-        publication = store.publish(db, parcel_id, calculation, who)
+        publication = commit_publication(db, doc, old, parcel_id, others, calculation, who, "human_confirm")
     return publication
+
+
+def selected_receipts(docs, source):
+    wanted = {str(i) for d in docs for i in (d.get("review") or {}).get("payment_ids", [])}
+    rows = {str(p["序号"]): p for p in source["payments"]}
+    if wanted - rows.keys():
+        raise ValueError("选中的缴费记录已不存在，请重新核对业务来源")
+    return {("receipt", str(rows[i]["票据号"]).strip()) if rows[i].get("票据号")
+            else ("row", i) for i in wanted}
+
+
+def validate_payment_ownership(db, docs, parcel_ids, source):
+    """A receipt may contribute to one active parcel; repeated same-parcel evidence is deduped by compute.
+
+    Called under the publication's BEGIN IMMEDIATE transaction, including batch confirmation.
+    Withdrawing all contributing documents releases the receipt without altering historical snapshots.
+    """
+    receipts = selected_receipts(docs, source)
+    if not receipts:
+        return
+    identifiers = {d["id"] for d in docs}
+    for row in db.execute("SELECT id,name,parcel_id,review FROM documents WHERE state='published'"):
+        if row["id"] in identifiers or follow_parcel(db, row["parcel_id"]) in parcel_ids:
+            continue
+        overlap = receipts & selected_receipts([store.doc_row(row)], source)
+        if overlap:
+            labels = "、".join(key[1] for key in sorted(overlap))
+            raise ValueError(f"票据 {labels} 已归入另一宗地（文书 {row['name']}），禁止重复抵扣；请先核对并撤回错误归集")
+
+
+def prepare_publication(db, doc, fields, identifier, create=True):
+    parcel_id, others = parcel_context(db, fields, identifier)
+    current = parcel_documents(db, [parcel_id, *others], identifier)
+    source = rules.source_for(db, SOURCE)
+    validate_payment_ownership(db, current + [doc], {parcel_id, *others}, source)
+    calculation = calculate_documents(current + [doc], source)
+    if create:
+        parcel_id, others = parcel_context(db, fields, identifier, create=True)
+    return parcel_id, others, calculation
+
+
+def commit_publication(db, doc, old, parcel_id, others, calculation, who, action):
+    identifier = doc["id"]
+    db.execute(
+        "UPDATE documents SET review=?,parcel_id=?,state='published',version=version+1,updated=? WHERE id=?",
+        (store.dumps(doc["review"]), parcel_id, time.time(), identifier),
+    )
+    store.audit(
+        db,
+        who,
+        action,
+        identifier,
+        {"before": old, "after": doc["review"], "model_run_at": (doc["result"] or {}).get("started_at")},
+    )
+    for other in sorted(others):
+        # 原合同编号把两组材料连成同一宗地：并入并保留历史快照
+        db.execute("UPDATE documents SET parcel_id=? WHERE parcel_id=? AND state='published'", (parcel_id, other))
+        db.execute("UPDATE parcels SET merged_into=? WHERE id=?", (parcel_id, other))
+        store.publish(db, other, calculate_documents([], SOURCE), who)
+        store.audit(db, who, "parcel_merge", other, {"into": parcel_id, "by_document": identifier})
+    return store.publish(db, parcel_id, calculation, who)
+
+
+@app.get("/api/batch-candidates")
+def batch_candidates():
+    rows = []
+    with store.connection() as db:
+        for row in db.execute("SELECT * FROM documents WHERE state='needs_human' ORDER BY created"):
+            doc = store.doc_row(row)
+            t = batch_candidate(db, doc)
+            t.pop("review", None)
+            rows.append({"id": doc["id"], "name": doc["name"], "version": doc["version"], **t})
+    return rows
+
+
+def batch_candidate(db, doc):
+    t = triage.triage(doc)
+    if not t["eligible"]:
+        return t
+    try:
+        target, others = parcel_context(db, t["fields"], doc["id"])
+        siblings = parcel_documents(db, [target, *others], doc["id"])
+        matches = suggest(t["fields"], SOURCE, [d["review"]["fields"] for d in siblings])
+        if matches.get("ambiguous") or any(p.get("match_strength") == "weak" for p in matches["payments"]):
+            raise ValueError("缴费存在同名弱匹配或归宗歧义，须逐项人工核对，不可批量入账")
+        review = {
+            "fields": t["fields"], "citations": t["citations"], "citation_details": t["citation_details"],
+            "evidence_clear": True, "material_complete": True, "confirm_calculation": True,
+            "confirm_payments": True,
+            "payment_ids": [str(p["序号"]) for p in matches["payments"] if p.get("preselect")],
+            "relief_ids": [r["批准文号"] for r in matches["reliefs"]],
+        }
+        candidate = {**doc, "review": review}
+        _, _, calculation = prepare_publication(db, candidate, t["fields"], doc["id"], create=False)
+        if any(i["type"] == "存疑待确认" for i in calculation["issues"]):
+            raise ValueError("存在存疑事项，转人工复核")
+        t.update(review=review, calculation=calculation, matches=matches,
+                 draft_hash=review_hash(candidate, review, calculation))
+    except ValueError as error:
+        t["eligible"] = False
+        t["reasons"].append(str(error))
+    return t
+
+
+@app.post("/api/batch-confirm")
+async def batch_confirm(request: Request):
+    """经办人员对“有把握”的材料批量确认（处理方式=自动通过）。每份仍逐份核算、留痕，失败的转人工。"""
+    who = actor(request)
+    body = await request.json()
+    if not body.get("reason", "").strip() or not body.get("reviewed_summary"):
+        raise HTTPException(400, "批量确认须填写依据并声明已浏览汇总表")
+    if not all(body.get(k) is True for k in
+               ("evidence_clear", "material_complete", "confirm_calculation", "confirm_payments")):
+        raise HTTPException(400, "批量确认仍须逐份核对原件、资料完整性、缴费和核算；不能仅凭模型一致发布")
+    results = []
+    for item in body.get("documents", [])[:200]:
+        identifier = item.get("id")
+        with store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            doc = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (identifier,)).fetchone())
+            if not doc or doc["version"] != item.get("version"):
+                results.append({"id": identifier, "published": False, "reason": "文书不存在或已变化"})
+                continue
+            t = batch_candidate(db, doc)
+            if not t["eligible"]:
+                results.append({"id": identifier, "published": False, "reason": "；".join(t["reasons"])})
+                continue
+            if not item.get("draft_hash") or item["draft_hash"] != t["draft_hash"]:
+                results.append({"id": identifier, "published": False, "reason": "核算或同宗材料已变化，请刷新汇总表并重新核对"})
+                continue
+            old = doc["review"]
+            doc["review"] = {
+                **t["review"],
+                "reason": body["reason"][:2000],
+                "actor": who,
+                "at": time.time(),
+                "method": "批量确认",
+            }
+            quality_errors = governance.validate_completeness(doc, body) + governance.validate_citations(doc, t["review"])
+            if quality_errors:
+                results.append({"id": identifier, "published": False, "reason": "；".join(quality_errors)})
+                continue
+            try:
+                parcel_id, others, calculation = prepare_publication(db, doc, t["fields"], identifier)
+            except ValueError as e:
+                results.append({"id": identifier, "published": False, "reason": str(e)})
+                continue
+            publication = commit_publication(db, doc, old, parcel_id, others, calculation, who, "batch_confirm")
+            results.append({"id": identifier, "published": True, "publication": publication["id"]})
+    return {"results": results, "published": sum(r["published"] for r in results)}
 
 
 @app.post("/api/documents/{identifier}/withdraw")
@@ -577,12 +740,8 @@ async def withdraw(identifier, request: Request):
                 (time.time(), identifier),
             )
             if doc["parcel_id"]:
-                current = [
-                    store.doc_row(r)
-                    for r in db.execute(
-                        "SELECT * FROM documents WHERE parcel_id=? AND state='published'", (doc["parcel_id"],)
-                    )
-                ]
+                doc["parcel_id"] = follow_parcel(db, doc["parcel_id"])
+                current = parcel_documents(db, [doc["parcel_id"]])
                 try:
                     payload = calculate_documents(current, rules.source_for(db, SOURCE))
                 except ValueError as e:
@@ -603,26 +762,61 @@ async def withdraw(identifier, request: Request):
 
 
 @app.get("/api/ledger")
-def ledger():
+def ledger(street: str = "", status: str = "", arrears: str = "", keyword: str = ""):
     with store.connection() as db:
-        return [
-            store.latest(db, r[0]) for r in db.execute("SELECT id FROM parcels") if store.latest(db, r[0])
-        ]
+        rows = operations.entries(db)
+    return operations.filtered(rows, street or None, status or None, arrears or None, keyword or None)
+
+
+@app.get("/api/reminders")
+def reminders(format: str = "json"):
+    with store.connection() as db:
+        items = operations.reminders(operations.entries(db))
+    if format == "ics":
+        return Response(
+            operations.ics(items),
+            media_type="text/calendar; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=land-lease-reminders.ics"},
+        )
+    return items
+
+
+@app.get("/api/stats")
+def stats(format: str = "json"):
+    with store.connection() as db:
+        rows = operations.entries(db)
+    result = operations.statistics(rows)
+    if format == "csv":
+        flat = [{"指标": k, "值": v} for k, v in result.items() if not isinstance(v, dict)]
+        flat += [{"指标": f"合同状态·{k}", "值": v} for k, v in result["按合同状态"].items()]
+        flat += [{"指标": f"街路·{k}·{kk}", "值": vv} for k, v in result["按街路"].items() for kk, vv in v.items()]
+        return Response(
+            operations.csv_bytes(flat, ["指标", "值"]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=stats.csv"},
+        )
+    return result
 
 
 @app.post("/api/notices/{publication_id}")
 def notice(publication_id: int, request: Request):
     who = actor(request)
+    from .outputs import notice_docx, notice_settings, sms_text
+
     with store.connection() as db:
         row = db.execute("SELECT * FROM publications WHERE id=?", (publication_id,)).fetchone()
         if not row:
             raise HTTPException(404)
+        latest = store.latest(db, row["parcel_id"])
+        if latest and latest["id"] != publication_id:
+            raise HTTPException(409, "该台账版本已被新版本替代，请按最新版本生成")
         payload = json.loads(row["payload"])
         if not payload.get("documents") or float(payload["arrears"]) <= 0:
             raise HTTPException(400, "当前快照无有效欠缴，不生成催缴通知")
         latest_doc = store.doc_row(
             db.execute("SELECT * FROM documents WHERE id=?", (payload["latest_document"],)).fetchone()
         )
+        settings = notice_settings()
         n = {
             "id": store.uid(),
             "status": "draft_not_sent",
@@ -632,21 +826,19 @@ def notice(publication_id: int, request: Request):
             "arrears": payload["arrears"],
             "annual": payload["annual"],
             "phone": payload["phone"],
-            "payment_instructions": "缴款截止日、地点、渠道与主管部门联系方式尚未配置；不得发送正式通知。",
-            "template": "exercise-notice-v2",
+            "phone_valid": bool(re.fullmatch(r"\d{11}", payload.get("phone") or "")),
+            "settings_configured": settings["configured"],
+            "template": "07_模板/国有土地租金催缴通知书（模板）",
             "contract_fields": latest_doc["review"]["fields"],
         }
-        from .outputs import notice_docx
-
-        raw = notice_docx(n, payload)
+        raw = notice_docx(n, payload, settings)
         file_hash = hashlib.sha256(raw).hexdigest()
         objects = store.DATA / "objects"
         objects.mkdir(exist_ok=True)
         (objects / (file_hash + ".docx")).write_bytes(raw)
         n["docx_sha256"] = file_hash
-        n["sms_draft"] = (
-            f"【模拟催缴草稿】{payload['recipient']}：{payload['address']}截至{payload['as_of']}欠缴{payload['arrears']}元。缴款截止日、地点和联系人待主管部门确认。未发送。"
-        )
+        n["sms"] = sms_text(payload, settings)
+        n["sms_draft"] = n["sms"]["text"]
         db.execute(
             "INSERT INTO notices(id,publication_id,payload,created) VALUES(?,?,?,?)",
             (n["id"], publication_id, store.dumps(n), time.time()),
@@ -655,74 +847,72 @@ def notice(publication_id: int, request: Request):
     return n
 
 
+NOTICE_STATUSES = {"已审核", "已发送", "发送失败", "号码无效", "已缴清", "有异议", "作废"}
+
+
+@app.post("/api/notices/{identifier}/events")
+async def notice_event(identifier: str, request: Request):
+    """催缴跟踪：短信通道待主管部门确认，发送结果由经办人员登记，形成可追溯的催缴记录。"""
+    who = actor(request)
+    body = await request.json()
+    if body.get("status") not in NOTICE_STATUSES:
+        raise HTTPException(400, "未知状态：" + "、".join(sorted(NOTICE_STATUSES)))
+    with store.connection() as db:
+        if not db.execute("SELECT 1 FROM notices WHERE id=?", (identifier,)).fetchone():
+            raise HTTPException(404)
+        db.execute(
+            "INSERT INTO notice_events(notice_id,status,note,created,actor) VALUES(?,?,?,?,?)",
+            (identifier, body["status"], str(body.get("note", ""))[:500], time.time(), who),
+        )
+        store.audit(db, who, "notice_event", identifier, {"status": body["status"]})
+    return {"notice": identifier, "status": body["status"]}
+
+
+@app.get("/api/notices")
+def notice_list():
+    with store.connection() as db:
+        rows = []
+        for r in db.execute("SELECT * FROM notices ORDER BY created DESC"):
+            n = json.loads(r["payload"])
+            events = [dict(e) for e in db.execute(
+                "SELECT status,note,created,actor FROM notice_events WHERE notice_id=? ORDER BY id", (r["id"],)
+            )]
+            rows.append({"id": r["id"], "publication": r["publication_id"], "recipient": n["recipient"],
+                         "arrears": n["arrears"], "phone": n.get("phone"), "created": r["created"],
+                         "status": events[-1]["status"] if events else "草稿待审核",
+                         "events": events, "sms": n.get("sms_draft")})
+    return rows
+
+
 @app.get("/api/export")
 def export():
     documents = [d for d in store.list_docs() if d["state"] == "published"]
-    ledgers = ledger()
     names = {d["id"]: d["name"] for d in documents}
-    contract_rows = [
-        {
-            "档案号": d["name"],
-            **{label: d["review"]["fields"].get(k, "") for k, label in FIELDS.items()},
-            "处理方式": "人工复核",
-        }
-        for d in documents
-    ]
+    methods = {d["id"]: d["review"].get("method") for d in documents}
+    with store.connection() as db:
+        ledgers = operations.entries(db)
+    contract_rows = [operations.contract_row(d) for d in sorted(documents, key=lambda d: d["name"])]
     ledger_rows, issue_rows = [], []
     for pub in ledgers:
         p = pub["payload"]
-        if not p["documents"]:
-            continue
+        automatic = all(methods.get(i) == "批量确认" for i in p["documents"])
+        ledger_rows.append(operations.ledger_row(pub, names, "自动通过" if automatic else "人工复核"))
         key = names.get(p.get("latest_document"), p.get("latest_document"))
-        ledger_rows.append(
-            {
-                "宗地键": key,
-                "档案号列表": ";".join(names.get(i, i) for i in p["documents"]),
-                "不动产单元号": p["registry_unit"],
-                "累计应缴": p["due"],
-                "累计实缴": p["paid"],
-                "欠缴金额": p["arrears"],
-                "2026年度应缴": next((x["due"] for x in p["annual"] if x["year"] == 2026), "0.00"),
-                "催缴对象": p["recipient"],
-                "处理方式": "人工复核",
-            }
-        )
         for issue in p["issues"]:
             issue_rows.append(
-                {
-                    "档案号": names.get(issue.get("document"), key),
-                    "问题类型": issue["type"],
-                    "说明": issue["reason"],
-                }
+                {"档案号": names.get(issue.get("document"), key), "问题类型": issue["type"], "说明": issue["reason"]}
             )
     target = io.BytesIO()
     with zipfile.ZipFile(target, "w") as z:
-        for name, rows, fallback in [
-            ("合同要素.csv", contract_rows, ["档案号", *FIELDS.values(), "处理方式"]),
-            (
-                "宗地台账.csv",
-                ledger_rows,
-                [
-                    "宗地键",
-                    "档案号列表",
-                    "不动产单元号",
-                    "累计应缴",
-                    "累计实缴",
-                    "欠缴金额",
-                    "2026年度应缴",
-                    "催缴对象",
-                    "处理方式",
-                ],
-            ),
-            ("问题清单.csv", issue_rows, ["档案号", "问题类型", "说明"]),
-        ]:
-            buffer = io.StringIO()
-            writer = csv.DictWriter(buffer, fieldnames=list(rows[0]) if rows else fallback)
-            writer.writeheader()
-            writer.writerows(rows)
-            z.writestr(name, buffer.getvalue().encode("utf-8-sig"))
+        z.writestr("合同要素.csv", operations.csv_bytes(contract_rows, operations.CONTRACT_COLUMNS))
+        z.writestr("宗地台账.csv", operations.csv_bytes(ledger_rows, operations.LEDGER_COLUMNS))
+        z.writestr("问题清单.csv", operations.csv_bytes(issue_rows, ["档案号", "问题类型", "说明"]))
+        pending = [r for r in issue_rows if r["问题类型"] == "存疑待确认"]
+        z.writestr("待确认清单.csv", operations.csv_bytes(pending, ["档案号", "问题类型", "说明"]))
         z.writestr(
-            "说明.txt", "本次只导出已人工确认的材料。字段与问题规则尚未覆盖完整比赛要求，不代表全量成绩。\n"
+            "说明.txt",
+            "只导出已人工确认发布的材料。列名与练习集 08_标准答案 一致；“处理方式”按确认方式填写"
+            "（批量确认=自动通过，逐项核对=人工复核）。待确认清单为存疑待确认事项。\n",
         )
     return Response(
         target.getvalue(),
@@ -736,7 +926,8 @@ def backup(request: Request):
     who = actor(request, admin=True)
     from .maintenance import create_backup
 
-    destination = ROOT / "runs" / ("backup-" + store.uid())
+    base = Path(os.environ.get("FDE_BACKUP_DIR", store.DATA.parent / (store.DATA.name + "-backups")))
+    destination = base / ("backup-" + time.strftime("%Y%m%d-%H%M%S") + "-" + store.uid()[:6])
     manifest = create_backup(store.DATA, destination, store.DB)
     with store.connection() as db:
         store.audit(db, who, "backup", str(destination), {"files": len(manifest)})
@@ -855,21 +1046,153 @@ def download_notice(identifier):
     )
 
 
-@app.get("/api/tax-export")
-def tax_export(year: int = 2026, quarter: int = 3):
+@app.post("/api/tax-push")
+async def tax_push(request: Request):
+    """生成并留存一期税务推送单（表2第7项：留存每次推送的内容）。不对接税务系统。"""
+    who = actor(request)
+    body = await request.json()
     from .outputs import tax_workbook
 
     try:
-        raw = tax_workbook(
-            ledger(), [d for d in store.list_docs() if d["state"] == "published"], SOURCE, year, quarter
+        year, quarter = int(body.get("year", 2026)), int(body.get("quarter", 3))
+        with store.connection() as db:
+            ledgers = operations.entries(db)
+        raw, count = tax_workbook(
+            ledgers, [d for d in store.list_docs() if d["state"] == "published"], active_source(), year, quarter
         )
-        return Response(
-            raw,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=tax-draft.xlsx"},
-        )
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e)) from e
+    digest = hashlib.sha256(raw).hexdigest()
+    objects = store.DATA / "objects"
+    objects.mkdir(exist_ok=True)
+    (objects / (digest + ".xlsx")).write_bytes(raw)
+    identifier = store.uid()
+    with store.connection() as db:
+        db.execute(
+            "INSERT INTO tax_pushes(id,period,sha256,rows,created,actor) VALUES(?,?,?,?,?,?)",
+            (identifier, f"{year}年第{quarter}季度", digest, count, time.time(), who),
+        )
+        store.audit(db, who, "tax_push_generated", identifier, {"period": f"{year}Q{quarter}", "rows": count})
+    return {"id": identifier, "period": f"{year}年第{quarter}季度", "rows": count, "sha256": digest}
+
+
+@app.get("/api/tax-pushes")
+def tax_pushes():
+    with store.connection() as db:
+        return [dict(r) for r in db.execute("SELECT * FROM tax_pushes ORDER BY created DESC")]
+
+
+@app.get("/api/tax-push/{identifier}/document")
+def tax_push_document(identifier: str):
+    with store.connection() as db:
+        row = db.execute("SELECT * FROM tax_pushes WHERE id=?", (identifier,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    return FileResponse(
+        store.DATA / "objects" / (row["sha256"] + ".xlsx"),
+        filename=f"税务推送单-{row['period']}.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/contracts/draft")
+async def contract_draft(request: Request):
+    """按制式模板生成新签/续期合同草稿并归档（表2第6项）。年租金由规则程序按现行计租标准计算。"""
+    who = actor(request)
+    body = await request.json()
+    from .domain import GRADES, USES, cents, dec, normalize_mode, to_upper_money
+    from .outputs import contract_docx
+
+    kind = body.get("kind", "续期")
+    if kind not in {"新签", "续期"}:
+        raise HTTPException(400, "合同类型只能是新签或续期；变更请导入变更协议")
+    with store.connection() as db:
+        parcel_id = follow_parcel(db, body.get("parcel_id"))
+        latest = store.latest(db, parcel_id) if parcel_id else None
+        if not latest or not latest["payload"].get("documents"):
+            raise HTTPException(404, "宗地没有已确认的台账")
+        p = latest["payload"]
+        base = store.doc_row(
+            db.execute("SELECT * FROM documents WHERE id=?", (p["latest_document"],)).fetchone()
+        )["review"]["fields"]
+    f = {**base, **{k: v for k, v in (body.get("fields") or {}).items() if v not in (None, "")}}
+    try:
+        start = date.fromisoformat(body.get("start") or "")
+        end = date.fromisoformat(body.get("end") or "")
+    except ValueError as e:
+        raise HTTPException(400, "请填写新合同起止日期") from e
+    if end <= start:
+        raise HTTPException(400, "终止日期须晚于起始日期")
+    try:
+        mode = normalize_mode(f.get("mode"))
+        if mode not in {"固定", "随标准调整"}:
+            raise ValueError("新合同计租方式须明确选择固定或随标准调整")
+        source = active_source()
+        overrides = body.get("fields") or {}
+        grade = overrides.get("grade") or p.get("ledger", {}).get("土地级别") or f.get("grade")
+        area_value = overrides.get("area")
+        if area_value in (None, ""):
+            area_value = p.get("ledger", {}).get("登记面积") or f.get("area")
+        area = dec(area_value)
+        if area <= 0 or grade not in GRADES or f.get("use") not in USES:
+            raise ValueError("新合同须提供有效的面积、用途和土地级别")
+        current = [r for r in source["rates"]
+                   if r["用途"] == f["use"] and str(r["执行起始日"])[:10] <= start.isoformat()]
+        if not current:
+            raise ValueError("新合同起始日无适用计租标准，不能沿用旧租金生成草稿")
+        rate = dec(max(current, key=lambda r: str(r["执行起始日"]))[grade])
+        if rate < 0:
+            raise ValueError("计租标准不能为负数")
+        # 固定与浮动只决定新合同生效后的调整方式；初始年租金均按本次面积和生效标准计算。
+        annual = cents(area * rate)
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, str(e)) from e
+    mode = "随基准地价调整" if mode == "随标准调整" else "固定"
+    values = {
+        "合同编号": body.get("contract_no") or "（编号待登记）",
+        "原合同编号": base.get("contract_no", ""),
+        "承租人": p["recipient"],
+        "证件号码": f.get("identity", ""),
+        "联系电话": p.get("phone") or f.get("phone", ""),
+        "住所": f.get("residence", ""),
+        "不动产单元号": p.get("registry_unit") or f.get("parcel_no", ""),
+        "坐落": p.get("address") or f.get("address", ""),
+        "土地面积": str(area),
+        "用途": f.get("use", ""),
+        "土地级别": grade or "",
+        "东至": f.get("east", "　"), "南至": f.get("south", "　"), "西至": f.get("west", "　"), "北至": f.get("north", "　"),
+        "起始日期": start.isoformat(),
+        "终止日期": end.isoformat(),
+        "年限": round(((end - start).days + 1) / 365.25),
+        "年租金标准": str(rate),
+        "计租标准版本": source.get("rate_version", "source-unversioned"),
+        "年租金小写": str(annual),
+        "年租金大写": to_upper_money(annual),
+        "计租方式": mode,
+        "签订日期": body.get("signed") or "（签订时填写）",
+    }
+    raw = contract_docx(values, kind, base.get("contract_no") if kind == "续期" else None)
+    digest = hashlib.sha256(raw).hexdigest()
+    (store.DATA / "objects").mkdir(exist_ok=True)
+    (store.DATA / "objects" / (digest + ".docx")).write_bytes(raw)
+    identifier = store.uid()
+    with store.connection() as db:
+        db.execute(
+            "INSERT INTO generated_contracts(id,parcel_id,kind,payload,sha256,created,actor) VALUES(?,?,?,?,?,?,?)",
+            (identifier, parcel_id, kind, store.dumps(values), digest, time.time(), who),
+        )
+        store.audit(db, who, "contract_draft", parcel_id, {"contract": identifier, "kind": kind})
+    return {"id": identifier, "kind": kind, "values": values,
+            "note": "合同草稿已归档；签订后扫描件仍须按导入流程入库确认"}
+
+
+@app.get("/api/contracts/{identifier}/document")
+def contract_document(identifier: str):
+    with store.connection() as db:
+        row = db.execute("SELECT * FROM generated_contracts WHERE id=?", (identifier,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    return FileResponse(store.DATA / "objects" / (row["sha256"] + ".docx"), filename=f"{row['kind']}合同草稿-{identifier}.docx")
 
 
 @app.post("/api/import-batch")
@@ -1056,6 +1379,49 @@ async def save_review_draft(identifier, request: Request):
     return {"saved": True, "effective": False, "version": doc["version"]}
 
 
+def follow_parcel(db, parcel_id):
+    seen = set()
+    while parcel_id and parcel_id not in seen:
+        seen.add(parcel_id)
+        row = db.execute("SELECT merged_into FROM parcels WHERE id=?", (parcel_id,)).fetchone()
+        if not row or not row[0]:
+            return parcel_id
+        parcel_id = row[0]
+    return parcel_id
+
+
+def parcel_context(db, fields, identifier, create=False):
+    """Target parcel for a document: registry/cadastre key plus 原合同编号 links (续期、变更链)."""
+    key = parcel_key(fields, SOURCE)
+    row = db.execute("SELECT id FROM parcels WHERE business_key=?", (key,)).fetchone()
+    direct = follow_parcel(db, row[0]) if row else None
+    linked = {follow_parcel(db, p) for p in linked_parcels(db, fields, exclude=identifier)}
+    candidates = ({direct} if direct else set()) | linked
+    if not candidates:
+        return (ensure_parcel(db, key) if create else None), set()
+
+    def rank(pid):
+        business_key = db.execute("SELECT business_key FROM parcels WHERE id=?", (pid,)).fetchone()[0]
+        return (not re.fullmatch(r"\d{12}[A-Z]{2}\d{14}|\w{28}", business_key or ""), pid)
+
+    target = min(candidates, key=rank)
+    if create and not row:
+        db.execute("INSERT INTO parcels(id,business_key,merged_into) VALUES(?,?,?)", (store.uid(), key, target))
+    return target, candidates - {target}
+
+
+def parcel_documents(db, parcel_ids, exclude=None):
+    out = []
+    for pid in dict.fromkeys(p for p in parcel_ids if p):
+        out += [
+            store.doc_row(r)
+            for r in db.execute(
+                "SELECT * FROM documents WHERE parcel_id=? AND state='published' AND id<>?", (pid, exclude or "")
+            )
+        ]
+    return out
+
+
 def review_hash(doc, body, calculation):
     included = {
         k: body.get(k)
@@ -1085,19 +1451,23 @@ async def attach_material(
     identifier, request: Request, files: list[UploadFile] = File(...), version: int = Form(...)
 ):
     who = actor(request)
+    if len(files) > 40:
+        raise HTTPException(400, "补件文件数超过40")
+    payloads = [(f.filename or "upload", await f.read(25 * 1024 * 1024 + 1)) for f in files]
+    return attach_payloads(identifier, version, payloads, who)
+
+
+def attach_payloads(identifier, version, payloads, who, extra_audit=None):
     doc = require_doc(identifier)
     check_version(doc, {"version": version})
     if doc["state"] in {"published", "withdrawn", "recognizing"}:
         raise HTTPException(409, "生效材料先撤回；识别执行中请等待，避免覆盖版本")
-    if len(files) > 40:
-        raise HTTPException(400, "补件文件数超过40")
     new_units = []
     new_manifests = []
     existing = {m["sha256"] for m in (doc.get("intake") or {}).get("files", [])}
-    for f in files:
-        raw = await f.read(25 * 1024 * 1024 + 1)
+    for name, raw in payloads:
         try:
-            units, manifest = intake.ingest(f.filename or "upload", raw, store.DATA / "objects")
+            units, manifest = intake.ingest(name, raw, store.DATA / "objects")
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         if manifest["sha256"] not in existing:
@@ -1120,7 +1490,7 @@ async def attach_material(
         db.execute("BEGIN IMMEDIATE")
         current = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (identifier,)).fetchone())
         check_version(current, {"version": version})
-        if db.execute("SELECT id FROM documents WHERE digest=? AND id<>?", (digest, identifier)).fetchone():
+        if db.execute("SELECT id FROM documents WHERE digest=? AND id<>? AND state<>'withdrawn'", (digest, identifier)).fetchone():
             raise HTTPException(409, "该材料组合已存在，需人工处理重复文书")
         db.execute(
             "UPDATE documents SET pages=?,intake=?,digest=?,result=NULL,review=NULL,state='queued',version=version+1,updated=? WHERE id=?",
@@ -1136,6 +1506,37 @@ async def attach_material(
                 "previous_version": version,
                 "new_files": [m["sha256"] for m in new_manifests],
                 "old_review_retained_in_audit": doc.get("review"),
+                **(extra_audit or {}),
             },
         )
     return {"version": version + 1, "duplicate": False, "confirmation": "invalidated"}
+
+
+@app.post("/api/documents/{identifier}/merge-into")
+async def merge_into(identifier, request: Request):
+    """补档材料命名/分组不整齐时，把误拆成单独文书的页并入目标文书（原件不改，旧文书撤回留痕）。"""
+    who = actor(request)
+    body = await request.json()
+    source = require_doc(identifier)
+    check_version(source, body)
+    if source["state"] in {"published", "recognizing"}:
+        raise HTTPException(409, "已发布请先撤回；识别执行中请等待")
+    target = body.get("target")
+    if not target or target == identifier:
+        raise HTTPException(400, "请选择要并入的目标文书")
+    payloads = [
+        (m["name"], Path(m["source"]).read_bytes())
+        for m in (source.get("intake") or {}).get("files", [])
+        if m.get("source") and Path(m["source"]).is_file()
+    ]
+    if not payloads:
+        raise HTTPException(400, "源文书没有可并入的原件")
+    result = attach_payloads(target, body.get("target_version"), payloads, who, {"merged_from": identifier})
+    with store.connection() as db:
+        db.execute("UPDATE occurrences SET active=0 WHERE document_id=?", (identifier,))
+        db.execute(
+            "UPDATE documents SET state='withdrawn',version=version+1,updated=? WHERE id=?", (time.time(), identifier)
+        )
+        db.execute("UPDATE jobs SET state='cancelled' WHERE document_id=? AND state='queued'", (identifier,))
+        store.audit(db, who, "merged_into", identifier, {"target": target, "reason": body.get("reason", "")})
+    return {"target": target, **result}

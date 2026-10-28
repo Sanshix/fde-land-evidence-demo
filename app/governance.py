@@ -5,9 +5,11 @@ import re
 import unicodedata
 from datetime import date
 
-from .domain import FIELDS, clean
+from .domain import DOCUMENT_ATTRIBUTES, FIELDS, clean
+from .extraction import merge, prose_candidates
 
 ALIASES = {
+    "doc_type": ["合同类型"],
     "contract_no": ["合同编号", "合同号"],
     "tenant": ["承租人", "承租方"],
     "identity": ["证件号码", "证件号"],
@@ -202,7 +204,7 @@ def validate_citations(doc, body):
     details = body.get("citation_details", {})
     errors = []
     for key, value in body.get("fields", {}).items():
-        if not value:
+        if not value or key in DOCUMENT_ATTRIBUTES:
             continue
         primary = body.get("citations", {}).get(key)
         if primary not in pages:
@@ -249,6 +251,7 @@ def parse_ocr_text(text, page, profile):
                 reason="云OCR转录按标签抽取；位置协议标记不当业务数字，重复行去重；未验证原图坐标，需核原件",
                 evidence_status="missing_region",
             )
+    candidates = merge(candidates, prose_candidates(lines, page["id"], profile["model_id"], profile["provider"]))
     return candidates, {
         "parser_version": "ocr-protocol-clean-v2",
         "location_markers_removed_from_extraction": markers,

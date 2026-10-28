@@ -1,0 +1,28 @@
+{
+  "enabled": true,
+  "reason": "正式环境/现场切换：政务网内或本机模型，数据不出网。primary 为本机开源 OCR，secondary 为内网部署的开源视觉模型（按实际地址修改）",
+  "authorized_scope": "explicit_sample_hash",
+  "authorized_sha256": [],
+  "page_budget_seconds": 60,
+  "models": {
+    "primary": {
+      "provider": "local",
+      "protocol": "local_rapidocr",
+      "model_id": "PP-OCRv4 (RapidOCR ONNX)",
+      "authorized": true,
+      "open_weights": true,
+      "license": "Apache-2.0",
+      "model_card_url": "https://github.com/RapidAI/RapidOCR"
+    },
+    "secondary": {
+      "provider": "vllm-intranet",
+      "base_url": "http://10.0.0.5:8000/v1",
+      "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "api_key_env": "",
+      "authorized": true,
+      "open_weights": true,
+      "license": "Apache-2.0",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct"
+    }
+  }
+}

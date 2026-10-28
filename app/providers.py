@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import io
+import ipaddress
 import json
 import math
 import os
@@ -15,10 +16,11 @@ from PIL import Image
 
 from .credentials import credential
 from .domain import FIELDS
+from .extraction import merge, prose_candidates
 from .governance import normalize, parse_ocr_text
 
 ROOT = Path(__file__).resolve().parents[1]
-PROMPT_VERSION = "cloud-evidence-v2"
+PROMPT_VERSION = "cloud-evidence-v3"
 
 
 class ProviderUnavailable(ValueError):
@@ -69,6 +71,37 @@ def public_status(config=None):
     return result
 
 
+_LOCAL_ENGINE = None
+
+
+def local_engine():
+    global _LOCAL_ENGINE
+    if _LOCAL_ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR
+
+        _LOCAL_ENGINE = RapidOCR()
+    return _LOCAL_ENGINE
+
+
+def is_private_endpoint(profile):
+    """政务网内/本机模型服务：内网 IP、回环地址，或配置中显式声明 network=private 的内网域名。"""
+    if profile.get("protocol") == "local_rapidocr":
+        return True
+    host = urlparse(profile.get("base_url", "")).hostname or ""
+    try:
+        address = ipaddress.ip_address(host)
+        return address.is_private or address.is_loopback
+    except ValueError:
+        return profile.get("network") == "private" or host == "localhost"
+
+
+def auth_headers(profile):
+    env = profile.get("api_key_env") or ""
+    if not env and is_private_endpoint(profile):
+        return {}  # 本地 vLLM/Ollama 等无需密钥
+    return {"Authorization": "Bearer " + credential(env, urlparse(profile["base_url"]).hostname)}
+
+
 def model_profile(config, stage):
     if not config.get("enabled"):
         raise ProviderUnavailable(
@@ -77,13 +110,26 @@ def model_profile(config, stage):
     p = config.get("models", {}).get(stage)
     if not p or not p.get("authorized") or not p.get("model_id") or not p.get("provider"):
         raise ProviderUnavailable(f"{stage}模型未配置/未获授权")
+    if p.get("protocol") == "local_rapidocr":
+        try:
+            import rapidocr_onnxruntime  # noqa: F401
+        except ImportError as e:
+            raise ProviderUnavailable("本机OCR组件 rapidocr_onnxruntime 未安装（离线包需含其 wheel）") from e
+        return p
     url = urlparse(p.get("base_url", ""))
-    if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
-        raise ProviderUnavailable("供应商base URL必须是明确的HTTPS地址，不含凭据/查询参数")
-    env = p.get("api_key_env", "")
+    private = is_private_endpoint(p)
+    if (
+        url.scheme not in ({"https", "http"} if private else {"https"})
+        or not url.hostname
+        or url.username
+        or url.password
+        or url.query
+        or url.fragment
+    ):
+        raise ProviderUnavailable("公网供应商须为HTTPS地址；HTTP仅限政务网/本机模型服务；均不得含凭据/查询参数")
     # Only explicitly named project variables; never inspect another app's account.
     try:
-        credential(env, url.hostname)
+        auth_headers(p)
         if p.get("protocol") == "baidu_ocr_oauth":
             credential(p.get("secret_key_env", ""), url.hostname)
     except ValueError as e:
@@ -91,10 +137,16 @@ def model_profile(config, stage):
     return p
 
 
-def approved_input(page, config):
+def approved_input(page, config, profile=None):
     original = Path(page.get("source", page["path"]))
     digest = hashlib.sha256(original.read_bytes()).hexdigest()
     if digest in set(config.get("authorized_sha256", [])):
+        return digest
+    if profile is not None and is_private_endpoint(profile):
+        return digest  # 数据不出政务网/本机
+    if config.get("authorized_scope") == "competition_simulated":
+        # 赛题第五节：比赛阶段只使用模拟数据，可以调用云端模型。评测集与现场补档也是模拟材料。
+        # 只能由运维在 providers.json 显式开启，正式环境禁止使用此范围。
         return digest
     if config.get("authorized_scope") == "fictional_exercise":
         from .business import SAMPLES
@@ -135,6 +187,8 @@ def parse_reply(reply, page, region, profile, kind="ocr"):
         if not isinstance(item, dict):
             continue
         key = item.get("field")
+        if key == "contract_type":  # Pre-PR multi-page responses used this name.
+            key = "doc_type"
         if key not in FIELDS or item.get("status") == "cannot_determine":
             continue
         value = item.get("value")
@@ -262,10 +316,7 @@ class CloudProvider:
         ) as client:
             response = client.post(
                 p["base_url"].rstrip("/") + "/chat/completions",
-                headers={
-                    "Authorization": "Bearer "
-                    + credential(p["api_key_env"], urlparse(p["base_url"]).hostname)
-                },
+                headers=auth_headers(p),
                 json={
                     "model": p["model_id"],
                     "temperature": 0,
@@ -315,6 +366,10 @@ class CloudProvider:
 
     def identify(self, page, region=None, focus=None, suggestions=None, context=False, timeout=40):
         p = self.profile
+        if p.get("protocol") == "local_rapidocr":
+            if context:
+                raise ProviderUnavailable("本机OCR不作为上下文推理模型")
+            return self.identify_local(page, region)
         if p.get("protocol") == "baidu_ocr_oauth":
             if context:
                 raise ProviderUnavailable("百度OCR专用接口不作为上下文推理模型")
@@ -389,10 +444,7 @@ class CloudProvider:
         ) as client:
             response = client.post(
                 p["base_url"].rstrip("/") + "/chat/completions",
-                headers={
-                    "Authorization": "Bearer "
-                    + credential(p["api_key_env"], urlparse(p["base_url"]).hostname)
-                },
+                headers=auth_headers(p),
                 json=body,
             )
         if response.status_code != 200:
@@ -428,6 +480,48 @@ class CloudProvider:
             "mode": "test_stub" if self.transport else "live-cloud",
             "region": image_box,
             "ocr_task_prompt": body["messages"][0]["content"][0]["text"] if plain_ocr else None,
+            "identity_evidence": {
+                k: p.get(k)
+                for k in ("open_weights", "model_card_url", "license", "weight_revision", "identity_verified")
+            },
+        }
+
+    def identify_local(self, page, region=None):
+        """本机开源 OCR（PaddleOCR 系列模型的 ONNX 版，RapidOCR 封装），不联网，CPU 可跑。"""
+        p = self.profile
+        engine = local_engine()
+        with Image.open(page["path"]) as original:
+            image = original.convert("RGB")
+            box = (0, 0, image.width, image.height) if not region else tuple(int(v) for v in region)
+            crop = image.crop(box)
+        started = time.monotonic()
+        import numpy
+
+        result, _ = engine(numpy.array(crop))
+        lines = []
+        for i, (points, text, score) in enumerate(result or [], 1):
+            xs, ys = [pt[0] for pt in points], [pt[1] for pt in points]
+            lines.append(
+                {
+                    "text": text,
+                    "score": round(float(score), 4),
+                    "box": [box[0] + min(xs), box[1] + min(ys), box[0] + max(xs), box[1] + max(ys)],
+                    "locator": f"line{i}",
+                }
+            )
+        candidates = prose_candidates(lines, page["id"], p["model_id"], p["provider"])
+        return {
+            "candidates": candidates,
+            "raw_response": {"lines": lines},
+            "provider": p["provider"],
+            "requested_model": p["model_id"],
+            "returned_model": p["model_id"],
+            "response_id": None,
+            "usage": None,
+            "elapsed_seconds": time.monotonic() - started,
+            "prompt_version": "local-ocr-prose-v1",
+            "mode": "live-local",
+            "region": list(box),
             "identity_evidence": {
                 k: p.get(k)
                 for k in ("open_weights", "model_card_url", "license", "weight_revision", "identity_verified")
@@ -497,7 +591,7 @@ class CloudProvider:
         ) as client:
             response = client.post(
                 p["base_url"],
-                headers={"Authorization": "Bearer " + credential(p["api_key_env"], "qianfan.baidubce.com")},
+                headers=auth_headers(p),
                 json={
                     "model": p["model_id"],
                     "file": encoded.split(",", 1)[1],
@@ -528,7 +622,10 @@ class CloudProvider:
                 {"text": line, "raw_text": line, "locator": f"response/block{index}/line{i}"}
                 for i, line in enumerate(text.splitlines(), 1)
             ]
-            extracted = native_candidates([{"id": page["id"], "native_lines": lines}])
+            extracted = merge(
+                native_candidates([{"id": page["id"], "native_lines": lines}]),
+                prose_candidates(lines, page["id"], p["model_id"], p["provider"]),
+            )
             b = block.get("block_bbox")
             valid = (
                 isinstance(width, (int, float))

@@ -264,3 +264,18 @@ main input[type=checkbox]:disabled { opacity: .5; cursor: not-allowed; }
 @media(max-width:1200px) { .identity .select-control { width: 86px; } }
 @media(max-width:900px) { .identity .select-control { width: 100%; } }
 @media(forced-colors:active) { .select-trigger:focus-visible { outline: 2px solid Highlight; } .select-option.is-active { outline: 1px solid Highlight; } main input[type=checkbox] { appearance: auto; } }
+
+
+.filters{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.filters label{flex:1 1 160px}
+.level{display:inline-block;padding:2px 8px;border-radius:10px;font-weight:600}
+.level-红{background:#fde2e1;color:#a4231c}
+.level-橙{background:#fdebd3;color:#9a5300}
+.level-黄{background:#fdf6c9;color:#6b5a00}
+
+#batch-list table { table-layout: fixed; }
+#batch-list th:first-child { width: 22%; }
+#batch-list th:nth-child(2) { width: 30%; }
+#batch-list td { vertical-align: top; }
+#batch-list td small { font-size: 12px; }
+#batch-list td button { margin-top: 8px; }

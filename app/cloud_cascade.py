@@ -11,6 +11,7 @@ from .providers import (
     ProviderUnavailable,
     approved_input,
     configuration,
+    is_private_endpoint,
     model_profile,
     public_status,
 )
@@ -77,14 +78,24 @@ def run_cloud_cascade(pages, run_dir, strategy="cascade", budget=180, config=Non
         result = {"id": page["id"], "quality": q, "stages": []}
         try:
             digest = approved_input(page, config)
-            result["source_sha256"] = digest
+            egress_ok, egress_reason = True, None
         except ProviderUnavailable as e:
-            result["error"] = str(e)
+            # 未获外发授权：只允许政务网/本机模型；公网路径逐个拦截
+            digest = hashlib.sha256(Path(page.get("source", page["path"])).read_bytes()).hexdigest()
+            egress_ok, egress_reason = False, str(e)
+        result["source_sha256"] = digest
+        stages_allowed = [
+            stage
+            for stage in (["primary"] if strategy == "primary" else ["primary", "secondary", "third", "context"])
+            if egress_ok or is_private_endpoint(config.get("models", {}).get(stage) or {})
+        ]
+        if not stages_allowed:
+            result["error"] = egress_reason
             out["pages"].append(result)
-            out["events"].append({"stage": "egress_guard", "status": "blocked", "reason": str(e)})
+            out["events"].append({"stage": "egress_guard", "status": "blocked", "reason": egress_reason})
             continue
         page_limit = min(float(config.get("page_budget_seconds", 60)), 90)
-        for stage in ["primary"] if strategy == "primary" else ["primary", "secondary", "third", "context"]:
+        for stage in stages_allowed:
             remaining = min(
                 budget - (time.monotonic() - started), page_limit - (time.monotonic() - page_start)
             )
@@ -133,7 +144,7 @@ def run_cloud_cascade(pages, run_dir, strategy="cascade", budget=180, config=Non
                     response = json.loads(checkpoint.read_text())
                     response["mode"] = "resumed_evidence"
                 else:
-                    out["external_calls"] += 1 if not transport else 0
+                    out["external_calls"] += 1 if not transport and not is_private_endpoint(profile) else 0
                     response = CloudProvider(profile, transport).identify(
                         page,
                         region,
@@ -177,13 +188,14 @@ def run_document_cascade(pages, run_dir, budget=240, config=None, transport=None
     started = time.monotonic()
     primary = model_profile(config, "primary")
     for page in pages:
-        approved_input(page, config)
+        approved_input(page, config, primary)
     signature = hashlib.sha256(
         json.dumps(
             {
                 "pages": [(p["id"], hashlib.sha256(Path(p["path"]).read_bytes()).hexdigest()) for p in pages],
                 "profiles": public_status(config),
                 "prompt": "multi-page-evidence-v1",
+                "parser": PROMPT_VERSION,
             },
             sort_keys=True,
         ).encode()
@@ -207,7 +219,7 @@ def run_document_cascade(pages, run_dir, budget=240, config=None, transport=None
         response = json.loads(primary_path.read_text())
         response["mode"] = "resumed_evidence"
     else:
-        output["external_calls"] += 0 if transport else 1
+        output["external_calls"] += 0 if transport or is_private_endpoint(primary) else 1
         response = CloudProvider(primary, transport).identify_document(
             pages, timeout=min(float(config.get("primary_timeout_seconds", 110)), 180, budget)
         )
@@ -248,6 +260,7 @@ def run_document_cascade(pages, run_dir, budget=240, config=None, transport=None
             else:
                 try:
                     profile = model_profile(config, "secondary")
+                    approved_input(page, config, profile)
                     if (profile["provider"], profile["model_id"]) == (
                         primary["provider"],
                         primary["model_id"],
@@ -258,7 +271,7 @@ def run_document_cascade(pages, run_dir, budget=240, config=None, transport=None
                         extra = json.loads(cache.read_text())
                         extra["mode"] = "resumed_evidence"
                     else:
-                        output["external_calls"] += 0 if transport else 1
+                        output["external_calls"] += 0 if transport or is_private_endpoint(profile) else 1
                         extra = CloudProvider(profile, transport).identify(page, timeout=min(40, remain))
                         cache.write_text(json.dumps(extra, ensure_ascii=False, indent=2))
                     row["stages"].append({"stage": "secondary", "status": "completed", **extra})

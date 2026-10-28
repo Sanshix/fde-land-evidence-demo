@@ -78,7 +78,8 @@ def test_relief_after_annual_and_separate_contract_rounding():
 def test_specified_overpayment_does_not_clear_another_year():
     p = payment(amount="150", year="2025")
     r = compute([contract(start="2025-01-01")], RATES, [p])
-    assert r["annual"][0]["paid"] == "120.00"
+    # 口径七（二）：注明年度的超额部分为多缴，不冲抵其他年度；逐年明细的“实缴”含该年度多缴（同标准答案）
+    assert r["annual"][0]["paid"] == "150.00" and r["annual"][0]["arrears"] == "0.00"
     assert r["annual"][1]["paid"] == "0.00"
     assert r["overpaid"] == "30.00"
     assert r["arrears"] == "90.00"
@@ -90,13 +91,23 @@ def test_unspecified_earliest_and_receipt_dedupe():
     assert r["annual"][0]["paid"] == "120.00"
     assert r["annual"][1]["paid"] == "30.00"
     assert r["paid"] == "150.00"
-    with pytest.raises(ValueError, match="票据"):
-        compute([contract()], RATES, [p, p | {"金额（元）": "151"}])
+    assert any(i["type"] == "缴费记录异常" and "重复" in i["reason"] for i in r["issues"])
+    # 同票据号内容不一致：按对产权人有利（金额较大）暂计，交业务层列入存疑待确认
+    conflict = compute([contract()], RATES, [p, p | {"金额（元）": "151"}])
+    assert conflict["paid"] == "151.00" and conflict["conflicts"][0]["difference"] == "1.00"
 
 
-def test_negative_balance_and_future_payment_excluded():
+def test_unannotated_payment_runs_forward_past_payment_year():
+    # 口径七（三）：依次向后冲抵，不以缴费日期截断（练习集 LX-009 2023 年补缴 2023 至 2025 年度）
+    r = compute([contract(start="2024-01-01")], RATES, [payment(amount="240", year=None, day="2024-03-01")])
+    assert [a["paid"] for a in r["annual"]] == ["120.00", "120.00", "0.00"]
+
+
+def test_negative_balance_and_payment_after_base_date_counted():
     assert compute([contract()], RATES, [payment(amount="200")])["arrears"] == "-80.00"
-    assert compute([contract()], RATES, [payment(day="2026-10-01")])["paid"] == "0.00"
+    # 口径八：实缴之和不以基准日截断（标准答案 LX-031/LX-040 的 2026-11 缴款计入），并在归集明细中注明
+    r = compute([contract()], RATES, [payment(day="2026-11-01")])
+    assert r["paid"] == "30.00" and "晚于核算基准日" in r["allocations"][0]["note"]
 
 
 def test_overlap_requires_explicit_human_scenario():

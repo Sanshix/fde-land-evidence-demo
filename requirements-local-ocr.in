@@ -1,0 +1,13 @@
+# 可选：本机开源 OCR（RapidOCR 封装的 PP-OCR ONNX 模型，CPU 运行、不联网）。
+# 版本为本次实测环境；离线包需在联网构建机预先下载这些 wheel。
+rapidocr-onnxruntime==1.2.3
+onnxruntime==1.29.0
+opencv-python==5.0.0.93
+numpy==2.5.3
+shapely==2.2.0
+pyclipper==1.4.0
+six==1.17.0
+PyYAML==6.0.3
+flatbuffers
+packaging
+protobuf

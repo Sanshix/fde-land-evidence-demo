@@ -13,6 +13,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from app.business import SAMPLES  # noqa: E402  (FDE_SAMPLES_DIR 或自动查找练习集目录)
+
 p = argparse.ArgumentParser()
 p.add_argument("--output", type=Path, required=True)
 p.add_argument("--cached-wheels", type=Path)
@@ -27,16 +30,16 @@ for name in ("app", "config"):
         ROOT / name, demo / name, ignore=shutil.ignore_patterns("__pycache__", "providers.json", "users.json")
     )
 (demo / "scripts").mkdir()
-for name in ("manage.py", "install.sh", "start.sh"):
+for name in ("manage.py", "install.sh", "start.sh", "start.ps1"):
     shutil.copy2(ROOT / "scripts" / name, demo / "scripts" / name)
 for name in ("pyproject.toml", "README.md", "requirements.in"):
     shutil.copy2(ROOT / name, demo / name)
 samples = out / "练习集"
 samples.mkdir()
-for f in (ROOT.parent / "练习集").iterdir():
+for f in SAMPLES.iterdir():
     if f.is_file() and f.name.startswith(("02_", "03_", "04_", "05_", "06_")):
         shutil.copy2(f, samples / f.name)
-shutil.copytree(ROOT.parent / "练习集/07_模板", samples / "07_模板")
+shutil.copytree(SAMPLES / "07_模板", samples / "07_模板")
 images = samples / "01_合同扫描件"
 images.mkdir()
 for prefix in (
@@ -51,7 +54,7 @@ for prefix in (
     "LX-018",
     "LX-025",
 ):
-    for f in (ROOT.parent / "练习集/01_合同扫描件").glob(prefix + "_*.jpg"):
+    for f in (SAMPLES / "01_合同扫描件").glob(prefix + "_*.jpg"):
         shutil.copy2(f, images / f.name)
 wheelhouse = demo / "wheelhouse"
 if a.cached_wheels:
