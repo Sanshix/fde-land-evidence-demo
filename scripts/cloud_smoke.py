@@ -11,6 +11,7 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.business import SAMPLES
 from app.credentials import credential, read_project_values
 from app.providers import image_payload
 
@@ -18,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--platform", choices=["siliconflow", "aliyun", "baidu"], required=True)
 args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
-source = ROOT.parent / "练习集/01_合同扫描件/LX-017_1.jpg"
+source = SAMPLES / "01_合同扫描件/LX-017_1.jpg"
 run = ROOT / "runs" / ("cloud-live-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
 run.mkdir(parents=True)
 encoded, _ = image_payload(source)

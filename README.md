@@ -1,132 +1,119 @@
-# 土档 · 国有土地租赁证据工作台
+# 土档 · 国有土地租赁智能管理
 
-Python 3.12 + FastAPI + SQLite + 文件证据仓库 + 原生 JavaScript。完整本机业务服务，界面不依赖 CDN。默认只监听 `127.0.0.1:8765`，单 worker。
+Python 3.12 + FastAPI + SQLite + 文件证据仓库 + 原生 JavaScript。界面不依赖 CDN，单 worker。
+需求依据：《国有土地租赁智能管理_赛题需求说明》（下称“赛题”）、练习集《06_计租标准与核算口径》（下称“口径”）、《使用说明.md》。
 
-**当前云端未取得成功响应。硅基流动和阿里已实际发起连接测试，均连接超时；百度已更正Key并实测，同样连接超时。** 无配置会进入人工旁路，不下载或调用本地模型。测试中的 `test_stub` 只验证接口与业务门禁。历史 `runs/paddle-probe.json` 是早先本机探针，不能当作当前云方案验收。
+## 赛题一期建设内容与实现位置
 
-## 从源码仓库准备环境
+| 赛题表2 | 实现 | 入口 |
+|---|---|---|
+| 1 存量合同治理 | 导入（图片/PDF/DOCX/XLSX、ZIP 整包）→ 识别候选 → 待核验工作台 → 逐项核对或批量确认 → 入库；问题清单按口径第十一条 13 类自动判定 | 01 材料与任务、02 待核验工作台、03 证据复核 |
+| 2 一宗一档电子台账 | 宗地按登记单元号 / 地号（新旧格式互认）/ 原合同编号链归集；可按街路、合同状态、欠缴、关键字查询 | 04 宗地台账、`GET /api/ledger?street=&status=&arrears=&keyword=` |
+| 3 租金核算 | `app/domain.py` 规则程序逐年分段；计租标准版本化可配置，改了规则对历史期间重算并留差异 | `GET/POST /api/rules*` |
+| 4 到期与欠缴提醒 | 红/橙/黄分级；可导出 `.ics` 导入日历 | `GET /api/reminders`、`?format=ics` |
+| 5 催缴通知 | 按 07_模板 生成通知书 DOCX 与 ≤70 字短信；登记审核/发送/缴清等结果形成催缴记录 | `POST /api/notices/{台账版本}`、`/api/notices/{id}/events` |
+| 6 合同生成与续期变更 | 按制式模板生成新签/续期合同草稿并归档；变更协议可导入并归宗；解除/收回填停止计租日 | `POST /api/contracts/draft` |
+| 7 税务推送单 | 按税务字段生成，每期留存可追溯 | `POST /api/tax-push`、`GET /api/tax-pushes` |
+| 8 统计查询 | 欠缴、到期、收缴率（累计/当年）、分街路统计，可导出 | `GET /api/stats`、`?format=csv` |
 
-仓库仅包含 `demo` 系统源码、测试、脚本与非秘密配置；不包含 `.env`、本机账户配置、数据库、上传原件、运行记录、虚拟环境、本地模型或目录外的练习集。
+人工智能只做识别、抽取、比对和提示；**金额只由规则程序计算**；所有模型结果为“待确认”，经人确认后才入库（赛题五(3)）。
 
-**当前程序启动依赖仓库同级的 `练习集` 目录。只克隆源码尚不能直接启动。** 请另行从原项目资料取得下列文件，保持目录结构；仓库不附带标准答案：
+## 目录与业务基础数据
+
+程序需要练习集（或评测集、正式导出）目录中的 `02`–`05` 四张表和 `07_模板`。查找顺序：
+
+1. 环境变量 `FDE_SAMPLES_DIR`（评测集、正式数据都用它切换）；
+2. 代码目录的上一级：`../练习集`、`../*/练习集`（如 `../国有土地租赁模拟样本包_练习集/练习集`）、`./练习集`。
 
 ```text
-工作目录/
-├── fde-land-evidence-demo/       # 本仓库
-└── 练习集/
-    ├── 02_不动产登记导出.xlsx
-    ├── 03_租金缴费记录.xlsx
-    ├── 04_租金减免登记.xlsx
-    ├── 05_计租标准与土地级别.xlsx
-    └── 07_模板/
-        ├── 国有土地租金催缴通知书（模板）.docx
-        └── 税务推送单（字段与样式）.xlsx
+黑客松/
+├── 代码/                                   # 本仓库
+└── 国有土地租赁模拟样本包_练习集/练习集/    # 自动找到；评测集请用 FDE_SAMPLES_DIR 指定
 ```
 
-前四张表是启动必需数据，模板用于导出；样张导入、云端样张探针及相关测试另需 `练习集/01_合同扫描件`。离线构建脚本也依赖原练习集中的业务基础文件。请按原资料访问权限单独提供这些文件。
+## 安装与启动
 
-联网开发机安装 Python 3.12 后，在仓库根目录运行：
+联网开发机（Python 3.12）：
 
 ```sh
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.in
-cp .env.example .env
-# 按需在 .env 填写密钥，并依下文配置云模型；人工旁路无需密钥。
-./scripts/start.sh
+cp .env.example .env              # 需要云模型时再填密钥
+./scripts/start.sh                # http://127.0.0.1:8765
 ```
 
-运行测试与静态检查时另需安装 `pytest` 和 `ruff`。`scripts/install.sh` 面向已经构建好的离线交付包，需要 `wheelhouse` 和 `requirements.lock`；源码克隆使用上面的联网安装步骤。
+Windows 开发机：`py -3.12 -m venv .venv`，`.venv\Scripts\python -m pip install -r requirements.in`，`powershell -File scripts\start.ps1`。
 
-## 本机启动
-
-当前开发环境已有 `.venv`：
+**服务器部署（多名经办人员访问）**：必须启用本地账号并声明浏览器访问地址，否则 `start.sh` 拒绝监听非本机地址：
 
 ```sh
-./scripts/start.sh
-# 浏览器 http://127.0.0.1:8765
-# 健康检查 http://127.0.0.1:8765/healthz
+.venv/bin/python scripts/manage.py add-user config/users.json 张三 --role reviewer
+.venv/bin/python scripts/manage.py add-user config/users.json 管理员 --role admin
+FDE_HOST=0.0.0.0 FDE_PORT=8765 FDE_USERS_FILE=$PWD/config/users.json \
+FDE_ALLOWED_ORIGINS=http://10.1.2.3:8765 FDE_SAMPLES_DIR=/data/正式导出 ./scripts/start.sh
 ```
 
-默认 `loopback_demo` 允许界面选择演示角色，不等于账号认证。要验证真实权限，请自行指定本地用户密码：
+`FDE_ALLOWED_ORIGINS` 是浏览器地址栏里的地址（逗号分隔多个），用于拒绝跨站写入。离线安装包：联网构建机运行
+`python3.12 scripts/build_offline.py --output /abs/new/dir`，目标机 `FDE_PYTHON=python3.12 ./scripts/install.sh`
+（只用包内 wheel，`--no-index --require-hashes`；Python 运行时本身未打包，需目标机预装）。
+
+## 模型配置与现场切换
+
+`FDE_PROVIDERS_CONFIG` 指向一份配置即切换（不改代码、不重启以外的操作）：
+
+| 配置 | 用途 |
+|---|---|
+| `config/providers.competition.json` | 比赛阶段云端视觉模型。`authorized_scope: competition_simulated` 允许评测集与现场补档（均为模拟材料）外发；**正式环境禁用** |
+| `config/providers.local.json` | 政务网/本机：`local_rapidocr` 本机开源 OCR（不联网），以及内网 vLLM/Ollama 等 OpenAI 兼容服务（`http://10.x` 内网地址允许 HTTP、可不配密钥） |
+| `config/providers.siliconflow.json` 等 | 原有单供应商配置 |
+
+外发规则：公网模型只接收已授权哈希或 `competition_simulated` 范围的材料；内网/本机模型不受此限（数据不出网）。
+本机 OCR 需额外安装 `requirements-local-ocr.in`。
+
+**练习集实测（本机开源 OCR）**：`python3 scripts/measure_local_ocr.py`。RapidOCR（PP-OCRv4 ONNX，CPU）+ 条款句式抽取，
+50 份 3.4 秒/份，关键字段唯一且正确率：签订日期 84%、宗地号 80%、计租方式 48%、起止日期约 40%、面积 30%、
+承租人 22%、坐落 0%；**没有一份关键字段全对**。结论：轻量本机 OCR 只能做辅助与离线兜底，全部送人工复核；
+批量确认需要视觉大模型（如 Qwen2.5/3-VL）的实测结果，尚待网络恢复后补测。
+
+## 核算口径要点（`app/domain.py`）
+
+- 年度计费月数含起止当月；年度应缴 = 适用年租金 × 月数 ÷ 12，每份合同分别取整后相加。
+- 随基准地价调整：面积 × 当年 1 月 1 日有效标准；合同未载明级别时按登记坐落（无登记则合同坐落）所在街路定级。
+- 大小写不一致按大写；期满未续按末份合同方式计至基准日所在年度全年；解除/收回计至当月。
+- 缴费：票据号去重；注明年度只记该年度（超出为多缴、不冲抵他年）；未注明年度冲抵最早未缴足年度并依次向后。
+  缴费日期晚于基准日的缴款计入实缴并注明。欠缴 = 应缴之和 − 实缴之和（含多缴）。
+- 存疑事项（口径第十二条）由程序列出各算法并取应缴最少者：计租方式未勾选、涂改处无签章、两份合同期间重叠、
+  同票据号金额不一致；“存疑待确认”写明暂按算法与相差金额，导出时单列《待确认清单》。
+- **取整口径待确认**：口径写“四舍五入到分”（默认 `half_up`）。练习集标准答案实际用二进制浮点 `round()`，
+  在恰好 x.xx5 时会舍去（如 1999.125→1999.12），5 宗地因此差 0.01–0.07 元。`FDE_ROUNDING=answer_key`
+  可复现标准答案用于自测；正式口径须主管部门书面确认。
+
+## 测试
 
 ```sh
-.venv/bin/python scripts/manage.py add-user config/users.json reviewer --role reviewer
-.venv/bin/python scripts/manage.py add-user config/users.json admin --role admin
-FDE_USERS_FILE="$PWD/config/users.json" ./scripts/start.sh
-```
-
-浏览器会要求 HTTP Basic 登录；服务端忽略伪造角色头，分别强制只读/经办/管理员权限。仅用于回环地址或已有可信 TLS 的内网入口；未提供生产 SSO。账户文件不会进入安装包和业务备份，需由运维单独保管。
-
-## 云模型接入（需用户明确目的地与数据范围）
-
-将 `config/providers.example.json` 复制为 `config/providers.json`，按供应商填写 `base_url`、确切 `model_id`、`provider`、指定密钥变量名（项目密钥按域名绑定，测试可用显式 `FDE_*` 环境变量）和每条路径的 `authorized`；最后明确启用 `enabled`。**不要将密钥写进 JSON 或聊天**。程序仅读取本项目允许名单中的 `.env` 变量或显式环境变量，不发现其他应用账号。`credentials.py`把各平台变量绑定到对应官方域名，阻止跨平台误用。
-
-支持 OpenAI-compatible结构化视觉chat、专业OCR纯文本，以及百度千帆专用OCR协议；三者协议均有标注为test_stub的本地测试，实际供应商响应尚未验证。`config/providers.siliconflow.json`、`providers.aliyun.json`、`providers.baidu.json`保存非秘密配置，可用`FDE_PROVIDERS_CONFIG`选择，当前均禁用以免网络故障下反复调用。百度/阿里仅允许已批准样张hash。`primary`→`secondary`→`third`→`context` 按缺失、格式、图像质量、证据缺失和分歧升级。第三/上下文未配置会明确跳过；同一模型不能计作独立第二路径。局部可定位时裁剪升级，无定位时整页。上下文返回值仍是建议，不自动确认。
-
-开源要求需核对官方模型卡、权重许可、版本/修订号与供应商模型身份，记录 `open_weights/model_card_url/license/weight_revision/identity_verified`。填写这些元数据不会自动获得“开源已实测通过”。至少一个真实测试模型满足该条件后，才算完成此项。
-
-`fictional_exercise` 仅允许原始练习图片 SHA-256 匹配；任意上传合同不会自动获准外发。其他输入要在授权后显式列入 `authorized_sha256`。未授权时零外发、转人工。云请求失败不无限重试；再次操作可复用已完成页/模型的证据，标记 `resumed_evidence`。页预算默认60秒，文书180秒，批次20分钟；预算检查不等于已经证明整包达标。
-
-## 多格式数据治理
-
-支持图片、原生/扫描/混合PDF、DOCX、XLSX；原件hash和全部页/段落/表格/单元格清单保留。Excel原值、显示解释、日期epoch、公式/缓存分别存；隐藏内容和合并范围可见；不执行宏、公式、嵌入对象。旧DOC/XLS及宏格式只存证并明确失败。原生结构提取不是AI准确率结果。
-
-独立“待核验工作台”集中识别问题、原件问题、业务冲突、未完成和待确认。原件先显示，候选默认折叠；人工采纳需引用真实位置、写依据、处理阻断项并核对完整性。补件使旧草稿、确认与预览失效；无法辨认则挂起。
-
-## 核心业务
-
-- 原件内容哈希去重、文书页序/旋转、持久任务、有限识别路径、逐页证据候选、人工改值/引用页/依据、无法辨认挂起。
-- 所有 AI 结果均待人工确认；关键事实未核实不能入有效台账。确认前先预览核算及新旧差异；版本冲突阻断发布。
-- 稳定内部宗地 ID；精确地籍映射，缴费/减免由人工选定；不以姓名直接归宗。
-- Decimal 确定性计算，逐年分段与付款归集、票据去重、大小写金额规则、到期未续继续计租。规则来源：练习集05、06。
-- 单事务发布、撤回某批贡献、重导复用证据后再次确认；发布/通知/费率/审计历史由数据库触发器禁止修改删除。
-- 管理员费率表版本：`GET /api/rules` → `POST /api/rules/preview` → `POST /api/rules/confirm`，提交差异摘要哈希、来源理由和本次核算复核声明；全体有效宗地重算，新版发布、旧版通知冻结。
-- ZIP 补档支持按文件夹分文书或根目录 `LX-017_1.jpg` 页码约定。API `/api/import-batch`，返回逐份结果；计时和内容正确性须分别验收，挂起不冒充全部完成。
-- 生成基于模板的催缴 DOCX 和短信草稿，**从未实际发送**。缺发文参数、金额大写复核和可选段审核，因此明确水印草稿。
-- 税务 XLSX 为模拟交换草稿；季度“本期应缴”口径不明时留空，不能擅自年租金除4。没有税务接口调用。
-
-## 三端架构与后置打包
-
-用户已确认完整业务优先。核心采用跨平台Python、SQLite、相对路径/可配置 `FDE_DATA_DIR`，模型provider、账户与秘密分离；Windows/Linux/macOS各需对应Python运行时和wheel。以下构建脚本是前期探针，当前不继续打三端包。`交付包/fde-macos-arm64-20261028-v3`早于当前schema5及新版界面，不是最新版交付。
-
-## 安装与可复现打包
-
-联网构建机（已有 Python3.12 和 pip）运行：
-
-```sh
-python3.12 scripts/build_offline.py --output /absolute/new/fde-package
-```
-
-只下载公开软件依赖 wheel，不下载模型。包含业务源代码、精确版本/哈希依赖、10份声明过的开发样本、业务基础表、模板、安装启动脚本；不含真值、密钥、生产数据、历史本地模型。
-
-目标机**预装 Python3.12 + venv**后：
-
-```sh
-cd /path/to/fde-package/demo
-FDE_PYTHON=/path/to/python3.12 ./scripts/install.sh
-./scripts/start.sh
-```
-
-安装器仅 `--no-index --find-links=wheelhouse --require-hashes`，不会下载组件。构建包只适配构建时 OS/架构；不是跨平台包。**Python运行时/操作系统未打进包，不可声称满足空白服务器全离线交付；须锁定比赛服务器后制作相应运行时/镜像并在干净 VM 验收。** 云推理联网与业务软件离线安装是两项独立条件。
-
-## 备份恢复
-
-```sh
-.venv/bin/python scripts/manage.py backup /absolute/new/backup-dir
-.venv/bin/python scripts/manage.py restore /path/to/backup /absolute/new/restore-dir
-FDE_DATA_DIR=/absolute/new/restore-dir ./scripts/start.sh
-```
-
-SQLite 在线快照 + 原件 + 识别运行证据 + SHA-256 清单。恢复只接受新目录，校验文件/DB完整性、重定位原件路径、保留业务快照与审计；排队/运行任务转为中断，需显式重试。不要覆盖旧库。账户和 API 密钥不在业务备份中。备份目录含合同内容，按原数据权限保存。
-
-## 验证与当前边界
-
-```sh
+.venv/bin/pip install pytest ruff
 .venv/bin/ruff check app tests scripts/manage.py scripts/build_offline.py
 .venv/bin/pytest -q
 node --check app/static/app.js
 ```
 
-测试使用 synthetic/test_stub 标记的数据。开发10份文书与其余40份留出集分离，不向模型输入标准答案或 scorer 输出。
+`tests/test_alignment.py` 用练习集标准答案的已确认要素走与 API 相同的归宗 → 缴费候选 → 核算 → 问题清单流程，
+再调用出题方 `score.py`：口径取整 96.2 分，`answer_key` 取整 100 分（问题清单 F1 100%、存疑待确认 3/3 文字与金额一致）。
+这验证的是规则引擎；识别准确率另由 `measure_local_ocr.py`/云端实测给出。
+也可手动：`python3 tests/exercise_pipeline.py <练习集>/08_标准答案 out/ && python3 <练习集>/score.py <练习集>/08_标准答案 out/`
+（需在仓库根目录、`PYTHONPATH=.`）。
 
-尚未通过：真实云识别和独立第二模型；开源模型身份核实及练习集实测；全50文书/30宗地逐宗逐年核对；陌生整包20分钟；真实人工耗时；完整13类问题自动发现；全部补档文书类型/争议多情景暂算；正式SSO/TLS；干净目标服务器与离线运行时安装。规则修订目前支持费率表，通用计算政策变更需代码版本。当前界面记录的复核停留时间包含闲置，不当作真实人工净工时。已发布材料修订当前需先撤回；尚未实现旧有效版本与新草稿并存的完整版本树。
+## 日常运维
+
+- 备份：界面“运行证据→备份”或 `.venv/bin/python scripts/manage.py backup /abs/new/dir`
+  （默认目录 `FDE_BACKUP_DIR`，否则数据目录旁的 `*-backups/`）。内容：SQLite 在线快照 + 原件 + 识别证据 + SHA-256 清单。
+- 恢复：`scripts/manage.py restore <备份目录> <新目录>`，校验通过后 `FDE_DATA_DIR=<新目录> ./scripts/start.sh`。不覆盖旧库。
+- 日志：uvicorn 标准输出；业务操作与 AI 结果、人工修改、确认、撤回、发文、推送均在审计表（触发器禁止改删）。
+- 账户、API 密钥、`config/notice.json` 不在业务备份内，由运维单独保管。
+
+## 尚未完成 / 需说明的边界
+
+- 视觉大模型在练习集上的实测、批量确认比例与准确率、3,000 份人员与天数测算（依赖真实识别结果）。
+- SOP、经办人员操作手册、年度运行费用测算等交付文档不在本仓库。
+- 短信通道、催缴文号与缴费地点、税务“本期应缴”口径、取整方式待主管部门确认（赛题第八节）。
+- PDF 内含多份文书时不会自动拆分；ZIP 分组错误可在复核页“并入所选文书”修正。

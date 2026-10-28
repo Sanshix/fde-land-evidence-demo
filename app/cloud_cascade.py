@@ -11,6 +11,7 @@ from .providers import (
     ProviderUnavailable,
     approved_input,
     configuration,
+    is_private_endpoint,
     model_profile,
     public_status,
 )
@@ -75,14 +76,24 @@ def run_cloud_cascade(pages, run_dir, strategy="cascade", budget=180, config=Non
         result = {"id": page["id"], "quality": q, "stages": []}
         try:
             digest = approved_input(page, config)
-            result["source_sha256"] = digest
+            egress_ok, egress_reason = True, None
         except ProviderUnavailable as e:
-            result["error"] = str(e)
+            # 未获外发授权：只允许政务网/本机模型；公网路径逐个拦截
+            digest = hashlib.sha256(Path(page.get("source", page["path"])).read_bytes()).hexdigest()
+            egress_ok, egress_reason = False, str(e)
+        result["source_sha256"] = digest
+        stages_allowed = [
+            stage
+            for stage in (["primary"] if strategy == "primary" else ["primary", "secondary", "third", "context"])
+            if egress_ok or is_private_endpoint(config.get("models", {}).get(stage) or {})
+        ]
+        if not stages_allowed:
+            result["error"] = egress_reason
             out["pages"].append(result)
-            out["events"].append({"stage": "egress_guard", "status": "blocked", "reason": str(e)})
+            out["events"].append({"stage": "egress_guard", "status": "blocked", "reason": egress_reason})
             continue
         page_limit = min(float(config.get("page_budget_seconds", 60)), 90)
-        for stage in ["primary"] if strategy == "primary" else ["primary", "secondary", "third", "context"]:
+        for stage in stages_allowed:
             remaining = min(
                 budget - (time.monotonic() - started), page_limit - (time.monotonic() - page_start)
             )
@@ -131,7 +142,7 @@ def run_cloud_cascade(pages, run_dir, strategy="cascade", budget=180, config=Non
                     response = json.loads(checkpoint.read_text())
                     response["mode"] = "resumed_evidence"
                 else:
-                    out["external_calls"] += 1 if not transport else 0
+                    out["external_calls"] += 1 if not transport and not is_private_endpoint(profile) else 0
                     response = CloudProvider(profile, transport).identify(
                         page,
                         region,

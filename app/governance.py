@@ -5,7 +5,7 @@ import re
 import unicodedata
 from datetime import date
 
-from .domain import FIELDS, clean
+from .domain import DOCUMENT_ATTRIBUTES, FIELDS, clean
 
 ALIASES = {
     "contract_no": ["合同编号", "合同号"],
@@ -201,7 +201,7 @@ def validate_citations(doc, body):
     details = body.get("citation_details", {})
     errors = []
     for key, value in body.get("fields", {}).items():
-        if not value:
+        if not value or key in DOCUMENT_ATTRIBUTES:
             continue
         primary = body.get("citations", {}).get(key)
         if primary not in pages:

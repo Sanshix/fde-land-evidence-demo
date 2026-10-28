@@ -29,7 +29,7 @@ def test_health_and_restore_checks_contents(client, tmp_path):
     assert Path(intake["files"][0]["source"]).is_relative_to(target)
     assert Path(intake["files"][0]["source"]).exists()
     db.close()
-    assert client.get("/healthz").json()["schema_version"] == 5
+    assert client.get("/healthz").json()["schema_version"] == 6
     with pytest.raises(ValueError):
         restore_backup(backup["path"], target)
     (Path(backup["path"]) / "objects" / Path(pages[0]["path"]).name).write_bytes(b"corrupted")
@@ -136,13 +136,17 @@ def test_batch_and_output_drafts(client):
     output = client.get(f"/api/notices/{n['id']}/document")
     with zipfile.ZipFile(io.BytesIO(output.content)) as z:
         text = z.read("word/document.xml").decode()
-        assert "演示草稿" in text and "120.00" in text and "【年度】" not in text
-    output = client.get("/api/tax-export")
+        assert "草稿" in text and "120.00" in text and "【" not in text
+    push = client.post("/api/tax-push", json={"year": 2026, "quarter": 3}, headers=HEAD)
+    assert push.status_code == 200, push.text
+    output = client.get(f"/api/tax-push/{push.json()['id']}/document")
     assert output.status_code == 200
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(output.content))
-    assert wb["推送单"].max_row == 2 and wb["推送单"].cell(2, 11).value is None
+    # 第三季度不含 6 月 30 日缴纳期限，本期应缴为 0；每次推送留存可追溯
+    assert wb["推送单"].max_row == 2 and wb["推送单"].cell(2, 11).value == 0
+    assert client.get("/api/tax-pushes").json()[0]["rows"] == 1
     batch = client.get("/api/status").json()["batches"][0]
     assert batch["all_published"] and batch["within_20_minutes"]
     with store.connection() as db:

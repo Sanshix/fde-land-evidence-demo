@@ -69,13 +69,28 @@ def init():
         for column in ("expected", "failures"):
             if column not in batch_columns:
                 db.execute(f"ALTER TABLE batches ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+        if "merged_into" not in {r[1] for r in db.execute("PRAGMA table_info(parcels)")}:
+            db.execute("ALTER TABLE parcels ADD COLUMN merged_into TEXT")
+        db.executescript("""
+        CREATE TABLE IF NOT EXISTS tax_pushes(id TEXT PRIMARY KEY, period TEXT NOT NULL, sha256 TEXT NOT NULL,
+          rows INTEGER NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS notice_events(id INTEGER PRIMARY KEY AUTOINCREMENT, notice_id TEXT NOT NULL
+          REFERENCES notices(id), status TEXT NOT NULL, note TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS generated_contracts(id TEXT PRIMARY KEY, parcel_id TEXT NOT NULL, kind TEXT NOT NULL,
+          payload TEXT NOT NULL, sha256 TEXT NOT NULL, created REAL NOT NULL, actor TEXT NOT NULL);
+        """)
+        for table in ("tax_pushes", "notice_events", "generated_contracts"):
+            for operation in ("UPDATE", "DELETE"):
+                db.execute(
+                    f"CREATE TRIGGER IF NOT EXISTS no_{operation.lower()}_{table} BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'immutable history'); END"
+                )
         columns = {r[1] for r in db.execute("PRAGMA table_info(documents)")}
         if "intake" not in columns:
             db.execute("ALTER TABLE documents ADD COLUMN intake TEXT")
         db.execute(
             "CREATE TABLE IF NOT EXISTS review_drafts(document_id TEXT PRIMARY KEY,version INTEGER NOT NULL,payload TEXT NOT NULL,actor TEXT NOT NULL,at REAL NOT NULL)"
         )
-        db.execute("PRAGMA user_version=5")
+        db.execute("PRAGMA user_version=6")
         # Interrupted work is visible and resumable; never silently marked successful.
         db.execute(
             "UPDATE jobs SET state='interrupted',error='进程中断，可显式重试或人工接管' WHERE state='running'"

@@ -168,7 +168,8 @@ def test_preview_binds_nonfinancial_fields_and_sources(client):
 
 
 def test_actual_existing_word_and_excel_read_only(tmp_path):
-    root = Path(__file__).resolve().parents[2] / "练习集"
+    from app.business import SAMPLES as root
+
     files = [root / "06_计租标准与核算口径.docx", root / "02_不动产登记导出.xlsx"]
     for f in files:
         before = f.read_bytes()

@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 
 import openpyxl
 import pypdfium2
-from PIL import Image
+from PIL import Image, ImageOps
 
 VERSION = "intake-v1"
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -69,10 +69,14 @@ def image_unit(raw, digest, index, name, source, objects, location=None):
     if getattr(im, "n_frames", 1) > 1:
         raise ValueError("多帧图片尚不支持，请转多页PDF；不静默取首帧")
     im.load()
+    orientation = im.getexif().get(0x0112, 1)
+    # 手机拍照件常带 EXIF 方向标记：按标记摆正后再做识别与人工核对（原件字节不变，另存）
+    upright = ImageOps.exif_transpose(im) if orientation not in (None, 1) else im
     target = objects / (hashlib.sha256(raw).hexdigest() + ".png")
     if not target.exists():
-        im.convert("RGB").save(target)
-    return unit(digest, index, name, source, "image", path=str(target), location=location or name)
+        upright.convert("RGB").save(target)
+    extra = {"exif_orientation": orientation} if orientation not in (None, 1) else {}
+    return unit(digest, index, name, source, "image", path=str(target), location=location or name, **extra)
 
 
 def embedded_images(z, digest, source, objects, prefix):

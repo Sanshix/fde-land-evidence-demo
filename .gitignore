@@ -16,3 +16,5 @@ wheelhouse/
 .DS_Store
 Thumbs.db
 *.py[cod]
+config/notice.json
+*-backups/
