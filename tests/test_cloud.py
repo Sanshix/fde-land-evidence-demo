@@ -269,13 +269,17 @@ def test_multi_page_citations_normalization_and_no_automatic_publication(cloud, 
 
 def test_ambiguous_numeric_candidate_is_not_silently_selected(cloud):
     page, cfg = cloud
-    c = parse_reply(
+    result = parse_reply(
         {"fields": [{"field": "area", "value": "100或200", "raw_text": "100或200"}]},
         page,
         (0, 0, 200, 200),
         cfg["models"]["primary"],
-    )["area"][0]
-    assert c["value"] == "100或200" and c["raw_value"] == "100或200"
+    )
+    assert result["area"] == []
+    observation = result.diagnostics["observations"][0]
+    assert observation["raw_value"] == "100或200"
+    assert observation["candidate_status"] == "needs_read"
+    assert observation["rejection_reason"] == "numeric_value_not_unique_or_invalid"
 
 
 def test_ocr_location_protocol_numbers_are_not_area_facts(cloud):
@@ -284,7 +288,50 @@ def test_ocr_location_protocol_numbers_are_not_area_facts(cloud):
     page, cfg = cloud
     line = "土地面积：１２３.４５平方米<|LOC_120|><|LOC_700|>"
     candidates, diagnostics = parse_ocr_text(line + "\n" + line, page, cfg["models"]["primary"])
-    assert [c["value"] for c in candidates["area"]] == ["123.45"]
+    assert [c["value"] for c in candidates["area"]] == ["123.45", "123.45"]
+    assert {c["response_locator"] for c in candidates["area"]} == {"response/line1", "response/line2"}
+    assert len({c["parse_provenance"]["response_id"] for c in candidates["area"]}) == 1
     assert candidates["area"][0]["bbox"] is None
     assert diagnostics["location_markers_removed_from_extraction"] == 4
-    assert diagnostics["duplicate_lines_excluded_from_extraction"] == 1
+    assert diagnostics["duplicate_lines_excluded_from_extraction"] == 0
+    assert diagnostics["duplicate_lines_observed"] == 1
+
+
+def test_primary_strategy_does_not_launch_fallback(cloud, tmp_path):
+    page, cfg = cloud
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content)['model'])
+        return response()
+    run_cloud_cascade([page], tmp_path / 'primary-only', strategy='primary',
+                      config=cfg, transport=httpx.MockTransport(handler))
+    assert calls == ['stub-primary']
+
+
+def test_deferred_fallback_does_not_repeat_failed_primary(cloud, tmp_path):
+    page, cfg = cloud
+    calls = []
+    def handler(request):
+        model = json.loads(request.content)['model']
+        calls.append(model)
+        if model == 'stub-primary':
+            raise httpx.ReadTimeout('synthetic primary timeout')
+        return response()
+    transport = httpx.MockTransport(handler)
+    first = run_cloud_cascade([page], tmp_path / 'defer', config=cfg, transport=transport, defer_fallback=True)
+    assert first['fallback_pending'] and calls == ['stub-primary']
+    assert first['pages'][0]['stages'][0]['status'] == 'failed'
+    final = run_cloud_cascade([page], tmp_path / 'defer', config=cfg, transport=transport, primary_result=first)
+    assert calls == ['stub-primary', 'stub-secondary', 'stub-context']
+    assert not final['fallback_pending']
+    assert final['pages'][0]['stages'][0]['status'] == 'failed'
+
+
+def test_no_background_work_when_primary_has_no_risks(cloud, tmp_path, monkeypatch):
+    page, cfg = cloud
+    monkeypatch.setattr('app.cloud_cascade.assess', lambda *args: [])
+    monkeypatch.setattr('app.cloud_cascade.quality', lambda *args: {'warnings': []})
+    result = run_cloud_cascade([page], tmp_path / 'enough', config=cfg,
+                              transport=httpx.MockTransport(lambda _: response()), defer_fallback=True)
+    assert not result['fallback_pending']
+    assert [s['stage'] for s in result['pages'][0]['stages']] == ['primary']

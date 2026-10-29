@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "datasets": {
+    "practice": {
+      "label": "练习题",
+      "directory": "../练习集",
+      "directory_env": "FDE_PRACTICE_DIR",
+      "cache": "runs/competition-full-20261028-final",
+      "prefix": "LX",
+      "cache_profile": "991d93a3674c0437948d390feb10036de34825707b7b740ab0f9c3cd8b0a9794",
+      "simulation_only": true
+    },
+    "evaluation": {
+      "label": "评测题",
+      "directory": "../评测集",
+      "directory_env": "FDE_EVALUATION_DIR",
+      "cache": "runs/competition-evaluation-20261028-final",
+      "prefix": "PC",
+      "cache_profile": "991d93a3674c0437948d390feb10036de34825707b7b740ab0f9c3cd8b0a9794",
+      "simulation_only": true
+    }
+  }
+}

@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="gov-blue">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>国有土地租赁智能管理系统 - 专项路演汇报</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入字体与图标 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ==========================================
+           中国 ToG 政务系统三套主题设计规范变量
+           ========================================== */
+        :root, [data-theme="gov-blue"] {
+            /* 方案一：数字政务蓝（一网通办/自然资源标准浅色风 - 默认推荐） */
+            --bg-page: #f4f7fb;
+            --bg-surface: #ffffff;
+            --bg-subtle: #eef3f9;
+            --bg-header: rgba(255, 255, 255, 0.95);
+            --text-main: #0f172a;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            --primary: #1d4ed8;
+            --primary-hover: #1e40af;
+            --primary-light: #dbeafe;
+            --accent: #0284c7;
+            --border-color: #dbe3ef;
+            --card-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
+            --hero-bg: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 55%, #0369a1 100%);
+            --badge-bg: rgba(255, 255, 255, 0.18);
+        }
+
+        [data-theme="gov-red"] {
+            /* 方案二：政务红金（机关专项汇报/权威庄重风） */
+            --bg-page: #faf8f5;
+            --bg-surface: #ffffff;
+            --bg-subtle: #fef2f2;
+            --bg-header: rgba(255, 255, 255, 0.96);
+            --text-main: #1c1917;
+            --text-secondary: #44403c;
+            --text-muted: #78716c;
+            --primary: #b91c1c;
+            --primary-hover: #991b1b;
+            --primary-light: #fee2e2;
+            --accent: #d97706;
+            --border-color: #e7e5e4;
+            --card-shadow: 0 4px 16px -2px rgba(185, 28, 28, 0.06);
+            --hero-bg: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 60%, #9a3412 100%);
+            --badge-bg: rgba(255, 255, 255, 0.2);
+        }
+
+        [data-theme="gov-dark"] {
+            /* 方案三：深空政务科技（自然资源智慧大屏/IOC指挥中心风） */
+            --bg-page: #0b1528;
+            --bg-surface: #132238;
+            --bg-subtle: #1a2f4c;
+            --bg-header: rgba(11, 21, 40, 0.94);
+            --text-main: #f8fafc;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --primary-light: rgba(59, 130, 246, 0.2);
+            --accent: #06b6d4;
+            --border-color: #23395d;
+            --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            --hero-bg: linear-gradient(135deg, #091326 0%, #172b4d 55%, #0f3c60 100%);
+            --badge-bg: rgba(56, 189, 248, 0.15);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+            background-color: var(--bg-page);
+            color: var(--text-main);
+            transition: background-color 0.25s ease, color 0.25s ease;
+            overflow-x: hidden;
+        }
+
+        .gov-card {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--card-shadow);
+            transition: all 0.2s ease;
+        }
+        .gov-card:hover {
+            border-color: var(--primary);
+        }
+
+        .gov-subtle {
+            background-color: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+        }
+
+        .gov-section-alt {
+            background-color: var(--bg-subtle);
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .gov-btn-primary {
+            background-color: var(--primary);
+            color: #ffffff;
+        }
+        .gov-btn-primary:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .gov-badge {
+            background-color: var(--primary-light);
+            color: var(--primary);
+        }
+        [data-theme="gov-dark"] .gov-badge {
+            color: #93c5fd;
+        }
+
+        .hero-banner {
+            background: var(--hero-bg);
+        }
+
+        .text-sec { color: var(--text-secondary); }
+        .text-mut { color: var(--text-muted); }
+        .border-gov { border-color: var(--border-color); }
+        .text-pri { color: var(--primary); }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- ==========================================
+         顶部政务导航栏 + ToG 主题实时切换器
+         ========================================== -->
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-gov px-4 md:px-8 py-3" style="background: var(--bg-header); backdrop-filter: blur(10px);">
+        <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
+            <!-- 左侧标题 -->
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg gov-btn-primary flex items-center justify-center font-bold shadow-sm shrink-0">
+                    <i class="fa-solid fa-landmark text-white text-base"></i>
+                </div>
+                <div>
+                    <div class="font-bold text-base md:text-lg tracking-wide flex items-center gap-2">
+                        <span>国有土地租赁智能管理系统</span>
+                        <span class="hidden sm:inline-block text-xs px-2 py-0.5 rounded font-semibold gov-badge">一期路演</span>
+                    </div>
+                    <div class="text-[11px] text-mut hidden sm:block">ASD STE 100 精简规范 · 数据不出政务网 · 纯规则算费</div>
+                </div>
+            </div>
+
+            <!-- 中间导航锚点 -->
+            <div class="hidden xl:flex items-center space-x-6 text-sm font-medium text-sec">
+                <a href="#core-value" class="hover:underline">01.核心逻辑</a>
+                <a href="#workbench-launcher" class="font-bold flex items-center gap-1 text-pri">
+                    <i class="fa-solid fa-desktop text-xs"></i>02.真实工作台
+                </a>
+                <a href="#efficiency" class="hover:underline">03.效能账本</a>
+                <a href="#architecture" class="hover:underline">04.架构与SOP</a>
+                <a href="#governance" class="hover:underline">05.硬件与推广</a>
+            </div>
+
+            <!-- 右侧 ToG 风格选择器 -->
+            <div class="flex items-center gap-1.5 p-1 rounded-lg border border-gov text-xs gov-subtle">
+                <span class="px-2 py-1 text-mut font-medium hidden md:inline"><i class="fa-solid fa-palette mr-1"></i>政务UI:</span>
+                <button onclick="setGovTheme('gov-blue')" id="theme-btn-gov-blue" class="px-2.5 py-1.5 rounded-md font-bold transition-all gov-btn-primary shadow-sm">
+                    1.政务蓝
+                </button>
+                <button onclick="setGovTheme('gov-red')" id="theme-btn-gov-red" class="px-2.5 py-1.5 rounded-md font-medium transition-all text-sec hover:opacity-80">
+                    2.国土红
+                </button>
+                <button onclick="setGovTheme('gov-dark')" id="theme-btn-gov-dark" class="px-2.5 py-1.5 rounded-md font-medium transition-all text-sec hover:opacity-80">
+                    3.深空屏
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ==========================================
+         首屏 Hero：30 秒看懂项目本质 (1个等式 + 3条铁律)
+         ========================================== -->
+    <section class="hero-banner text-white pt-24 pb-12 px-6">
+        <div class="max-w-7xl mx-auto">
+            <div class="grid lg:grid-cols-12 gap-8 items-center">
+                <!-- 左侧：一句话讲透 -->
+                <div class="lg:col-span-7 space-y-4">
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold border border-white/25" style="background: var(--badge-bg);">
+                        <i class="fa-solid fa-bolt"></i>
+                        <span>奥卡姆剃刀精简版 · 30秒抓重点 · 2分钟读完全页</span>
+                    </div>
+                    <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">
+                        一期本质：把 3,000 份纸质老合同<br>
+                        <span class="text-amber-300">变成「会自己算账、到点催款」的活台账</span>
+                    </h1>
+
+                    <!-- 核心公式（小白秒懂） -->
+                    <div class="bg-black/25 border border-white/20 rounded-xl p-3.5 text-xs md:text-sm font-mono flex flex-wrap items-center gap-2">
+                        <span class="px-2 py-0.5 rounded bg-white/20 font-bold">一期系统</span> =
+                        <span class="text-sky-200 font-bold">AI 读纸质合同(人确认)</span> +
+                        <span class="text-emerald-300 font-bold">纯代码算清欠款(0差错)</span> +
+                        <span class="text-amber-200 font-bold">日历提醒与发短信</span>
+                    </div>
+
+                    <!-- 三条铁律（专家看深度） -->
+                    <div class="grid sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+                        <div class="bg-white/10 p-2.5 rounded-lg border border-white/15">
+                            <div class="font-bold text-amber-300">铁律1：AI 绝不算钱</div>
+                            <div class="text-white/80 mt-0.5">AI 只认字比对，算钱 100% 走代码规则</div>
+                        </div>
+                        <div class="bg-white/10 p-2.5 rounded-lg border border-white/15">
+                            <div class="font-bold text-emerald-300">铁律2：AI 不直入库</div>
+                            <div class="text-white/80 mt-0.5">全部默认[待确认]，经办人点确认才生效</div>
+                        </div>
+                        <div class="bg-white/10 p-2.5 rounded-lg border border-white/15">
+                            <div class="font-bold text-sky-200">铁律3：存疑算低不算高</div>
+                            <div class="text-white/80 mt-0.5">资料冲突按有利产权人暂算，单列待确认</div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3 pt-1">
+                        <a href="#workbench-launcher" class="px-5 py-2.5 bg-white text-slate-900 font-bold rounded-lg shadow hover:bg-slate-100 transition flex items-center gap-2 text-xs md:text-sm">
+                            <i class="fa-solid fa-arrow-up-right-from-square text-blue-700"></i> 打开真实工作台 (fde-land-evidence-demo)
+                        </a>
+                        <a href="#architecture" class="px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white border border-white/30 font-semibold rounded-lg transition text-xs md:text-sm">
+                            看左技术栈 / 右SOP →
+                        </a>
+                    </div>
+                </div>
+
+                <!-- 右侧：4个核心数字 -->
+                <div class="lg:col-span-5">
+                    <div class="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5 space-y-3">
+                        <div class="text-xs font-bold text-white/90 border-b border-white/15 pb-2 flex justify-between">
+                            <span>一期交付硬指标</span>
+                            <span class="font-mono text-emerald-300">政务内网离线包</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-black/25 p-3.5 rounded-xl">
+                                <div class="text-2xl font-extrabold text-amber-300">7.5 <span class="text-xs font-normal">天</span></div>
+                                <div class="text-xs text-white/80 mt-0.5">2人清空3,000份存量合同</div>
+                            </div>
+                            <div class="bg-black/25 p-3.5 rounded-xl">
+                                <div class="text-2xl font-extrabold text-emerald-300">≤ 20 <span class="text-xs font-normal">分钟</span></div>
+                                <div class="text-xs text-white/80 mt-0.5">现场乱序材料极限补档</div>
+                            </div>
+                            <div class="bg-black/25 p-3.5 rounded-xl">
+                                <div class="text-2xl font-extrabold">0 <span class="text-xs font-normal">接口开发</span></div>
+                                <div class="text-xs text-white/80 mt-0.5">导表比对登记/文件报税务</div>
+                            </div>
+                            <div class="bg-black/25 p-3.5 rounded-xl">
+                                <div class="text-2xl font-extrabold text-sky-300">1 键 <span class="text-xs font-normal">撤回</span></div>
+                                <div class="text-xs text-white/80 mt-0.5">导错回滚无脏数据残留</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 01：核心逻辑闭环（3步讲清系统干什么）
+         ========================================== -->
+    <section id="core-value" class="py-10 px-6">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-6 border-b border-gov pb-3">
+                <div>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded gov-badge">01 · 业务闭环 (15秒速读)</span>
+                    <h2 class="text-xl md:text-2xl font-bold mt-1">一期只做三件事：建准台账 → 算准欠款 → 到点催缴报税</h2>
+                </div>
+                <span class="text-xs text-mut font-mono">遵循奥卡姆剃刀：砍掉跨部门接口，用文件导入导出解决</span>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-5">
+                <!-- 1 -->
+                <div class="gov-card rounded-xl p-5 border-t-4" style="border-top-color: var(--primary);">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-base">① 变废为宝：一宗一档库</span>
+                        <span class="text-xs px-2 py-0.5 rounded gov-badge font-mono">替人翻档案柜</span>
+                    </div>
+                    <p class="text-xs text-sec leading-relaxed mb-3">
+                        <b>小白视角：</b>把扫描合同、登记表、缴费单喂给系统，自动按“同一块地”串成完整档案，手写涂改、缺页自动挑出来让人看。
+                    </p>
+                    <div class="text-[11px] font-mono text-mut pt-2 border-t border-gov">
+                        🔧 技术：Layout-OCR + 三源主键对齐 + 状态强制[待确认]
+                    </div>
+                </div>
+
+                <!-- 2 -->
+                <div class="gov-card rounded-xl p-5 border-t-4" style="border-top-color: var(--accent);">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-base">② 铁面算盘：代码规则算费</span>
+                        <span class="text-xs px-2 py-0.5 rounded gov-badge font-mono">替财务算分段账</span>
+                    </div>
+                    <p class="text-xs text-sec leading-relaxed mb-3">
+                        <b>小白视角：</b>租金按年限分段涨价，程序1秒算出每年应收多少、欠多少。资料说不清的，先按对老百姓最有利（少交钱）暂算并挂账。
+                    </p>
+                    <div class="text-[11px] font-mono text-mut pt-2 border-t border-gov">
+                        🔧 技术：确定性规则引擎 + 双算法差额快照 + 改规则历史重算
+                    </div>
+                </div>
+
+                <!-- 3 -->
+                <div class="gov-card rounded-xl p-5 border-t-4 border-t-emerald-600">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-bold text-base">③ 到点叫醒：提醒与推送</span>
+                        <span class="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono">替人盯着到期日</span>
+                    </div>
+                    <p class="text-xs text-sec leading-relaxed mb-3">
+                        <b>小白视角：</b>像手机日历一样提醒经办人“哪块地快到期、谁欠钱”；一键生成催缴单发短信给产权人，一键导出税务局要的表格。
+                    </p>
+                    <div class="text-[11px] font-mono text-mut pt-2 border-t border-gov">
+                        🔧 技术：分级日历触发器 + 制式模板渲染 + 税务离线推送快照
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 02：真实工作台直连 (Sanshix/fde-land-evidence-demo)
+         ========================================== -->
+    <section id="workbench-launcher" class="py-10 px-6 gov-section-alt">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-5 border-b border-gov pb-3">
+                <div>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded gov-badge">02 · 实机检阅 (Sanshix/fde-land-evidence-demo)</span>
+                    <h2 class="text-xl md:text-2xl font-bold mt-1">真实工作台路由矩阵（点击直达或内嵌投屏）</h2>
+                </div>
+
+                <!-- 真实工作台 Base URL 配置栏 -->
+                <div class="gov-card p-2.5 rounded-xl flex flex-wrap items-center gap-2 text-xs">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-1"></span>
+                    <span class="font-semibold text-sec">工作台地址:</span>
+                    <input type="text" id="workbench-base-url" value="http://localhost:5173"
+                        class="px-2.5 py-1 rounded border border-gov bg-transparent font-mono text-xs w-44 focus:outline-none"
+                        onchange="updateWorkbenchLinks()">
+                    <button onclick="toggleLiveIframe()" class="px-3 py-1 rounded gov-btn-primary font-bold flex items-center gap-1">
+                        <i class="fa-solid fa-tv"></i>
+                        <span id="iframe-toggle-label">内嵌投屏</span>
+                    </button>
+                    <a href="https://github.com/Sanshix/fde-land-evidence-demo" target="_blank"
+                        class="px-2.5 py-1 rounded border border-gov hover:opacity-80 font-semibold">
+                        <i class="fa-brands fa-github"></i> 源码
+                    </a>
+                </div>
+            </div>
+
+            <!-- 考核维度筛选按钮组 -->
+            <div class="flex flex-wrap gap-2 mb-5">
+                <button onclick="filterModules('all')" id="filter-all" class="mod-filter-btn px-3.5 py-1.5 rounded-lg text-xs font-bold gov-btn-primary shadow-sm">
+                    全部模块 (8)
+                </button>
+                <button onclick="filterModules('supplement')" id="filter-supplement" class="mod-filter-btn px-3.5 py-1.5 rounded-lg text-xs font-medium gov-card">
+                    🔥 现场20分钟补档 (40分)
+                </button>
+                <button onclick="filterModules('doubt')" id="filter-doubt" class="mod-filter-btn px-3.5 py-1.5 rounded-lg text-xs font-medium gov-card">
+                    ⚖️ 存疑判断与核验 (15分)
+                </button>
+                <button onclick="filterModules('calc')" id="filter-calc" class="mod-filter-btn px-3.5 py-1.5 rounded-lg text-xs font-medium gov-card">
+                    🧮 规则算费与催缴报税
+                </button>
+                <button onclick="filterModules('ops')" id="filter-ops" class="mod-filter-btn px-3.5 py-1.5 rounded-lg text-xs font-medium gov-card">
+                    ⚙️ 模型热切与运维 (25分)
+                </button>
+            </div>
+
+            <!-- 真实系统模块卡片矩阵 -->
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4" id="module-cards-grid"></div>
+
+            <!-- 真实工作台内嵌 Iframe 投屏容器 -->
+            <div id="live-iframe-wrapper" class="hidden mt-5 gov-card rounded-xl overflow-hidden border-2" style="border-color: var(--primary);">
+                <div class="px-4 py-2.5 border-b border-gov flex flex-wrap items-center justify-between gap-2 text-xs gov-subtle">
+                    <div class="flex items-center gap-2 font-mono">
+                        <span class="px-2 py-0.5 rounded gov-btn-primary text-[10px] font-bold">LIVE</span>
+                        <span id="iframe-current-src" class="font-bold">http://localhost:5173/</span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button onclick="reloadLiveIframe()" class="hover:underline"><i class="fa-solid fa-rotate-right mr-1"></i>刷新</button>
+                        <a id="iframe-external-link" href="http://localhost:5173/" target="_blank" class="font-bold hover:underline text-pri">
+                            新窗口全屏 ↗
+                        </a>
+                        <button onclick="toggleLiveIframe()" class="text-rose-600 font-bold">关闭 ✕</button>
+                    </div>
+                </div>
+                <iframe id="workbench-iframe" src="about:blank" class="w-full h-[600px] bg-white" frameborder="0"></iframe>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 03：效能账本（上线前后极简对比）
+         ========================================== -->
+    <section id="efficiency" class="py-10 px-6">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-6 border-b border-gov pb-3">
+                <div>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded gov-badge">03 · 效能账本 (20秒速读)</span>
+                    <h2 class="text-xl md:text-2xl font-bold mt-1">上线前后对比：从「百份整理3个月」到「3,000份7.5天清零」</h2>
+                </div>
+                <span class="text-xs text-mut">数据来源：甲方录音实情 vs 练习集实测推演</span>
+            </div>
+
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="gov-card p-4 rounded-xl border-l-4" style="border-left-color: var(--primary);">
+                    <div class="text-xs text-mut font-semibold">整理 100 份合同</div>
+                    <div class="mt-1.5 flex items-baseline gap-2">
+                        <span class="text-xs line-through text-rose-600">人工 2~3个月</span>
+                        <span class="text-xl font-extrabold text-pri">→ 3.5 小时</span>
+                    </div>
+                    <div class="text-[11px] text-sec mt-1">AI 先提要素，人只看红框差异</div>
+                </div>
+
+                <div class="gov-card p-4 rounded-xl border-l-4" style="border-left-color: var(--primary);">
+                    <div class="text-xs text-mut font-semibold">本镇 3,000 份入库</div>
+                    <div class="mt-1.5 flex items-baseline gap-2">
+                        <span class="text-xs line-through text-rose-600">常年积压</span>
+                        <span class="text-xl font-extrabold text-pri">→ 2人×7.5天</span>
+                    </div>
+                    <div class="text-[11px] text-sec mt-1">70%常规卷批量过，30%异常精核</div>
+                </div>
+
+                <div class="gov-card p-4 rounded-xl border-l-4" style="border-left-color: var(--primary);">
+                    <div class="text-xs text-mut font-semibold">分段调价算租金</div>
+                    <div class="mt-1.5 flex items-baseline gap-2">
+                        <span class="text-xs line-through text-rose-600">手算易错</span>
+                        <span class="text-xl font-extrabold text-pri">→ 1 秒重算</span>
+                    </div>
+                    <div class="text-[11px] text-sec mt-1">改规则自动重算历史并留存差异</div>
+                </div>
+
+                <div class="gov-card p-4 rounded-xl border-l-4" style="border-left-color: var(--primary);">
+                    <div class="text-xs text-mut font-semibold">现场随机补档</div>
+                    <div class="mt-1.5 flex items-baseline gap-2">
+                        <span class="text-xs line-through text-rose-600">翻柜半天</span>
+                        <span class="text-xl font-extrabold text-pri">→ ≤ 20 分钟</span>
+                    </div>
+                    <div class="text-[11px] text-sec mt-1">自动认宗地、重算欠款、可一键撤回</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 04：双栏核心（左：技术栈 | 右：业务 SOP）
+         ========================================== -->
+    <section id="architecture" class="py-10 px-6 gov-section-alt">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-6 border-b border-gov pb-3">
+                <div>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded gov-badge">04 · 架构与流程 (40秒速读)</span>
+                    <h2 class="text-xl md:text-2xl font-bold mt-1">左看「技术栈怎么防错」，右看「经办人怎么干活」</h2>
+                </div>
+                <span class="text-xs text-mut font-mono">对应评分：现场补档(40分) + 部署运行(25分) + 流程测算(20分)</span>
+            </div>
+
+            <div class="grid lg:grid-cols-2 gap-6 items-stretch">
+
+                <!-- 【左栏】技术栈架构 (给技术人员看深度) -->
+                <div class="gov-card rounded-xl p-5 flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between border-b border-gov pb-2.5 mb-4">
+                            <span class="font-bold text-base flex items-center gap-2">
+                                <i class="fa-solid fa-layer-group text-pri"></i> 左栏：离线技术栈（4层解耦）
+                            </span>
+                            <span class="text-[11px] font-mono px-2 py-0.5 rounded gov-badge font-bold">政务网断网可用</span>
+                        </div>
+
+                        <div class="space-y-2.5 text-xs">
+                            <div class="gov-subtle p-3 rounded-lg border-l-4" style="border-left-color: var(--primary);">
+                                <div class="flex justify-between font-bold">
+                                    <span>1. 交互层：双屏核验 + 仿日历看板</span>
+                                    <span class="font-mono text-mut">React/Vue + PDF.js</span>
+                                </div>
+                                <div class="text-sec mt-1">左屏扫描件红框坐标定位，右屏表单修改留痕；日历红黄绿三级预警。</div>
+                            </div>
+
+                            <div class="gov-subtle p-3 rounded-lg border-l-4 border-l-rose-600">
+                                <div class="flex justify-between font-bold">
+                                    <span>2. 规则与事务层（核心护城河）</span>
+                                    <span class="font-mono text-rose-600">0 AI推算 · 事务回滚</span>
+                                </div>
+                                <div class="text-sec mt-1">
+                                    • <b>算费引擎：</b>纯代码计算年期分段与地价浮动，存疑自动双算比差。<br>
+                                    • <b>防重与撤回：</b>文件 SHA-256 幂等防重；批次 ID 绑定，<b>导错一键级联回滚</b>。
+                                </div>
+                            </div>
+
+                            <div class="gov-subtle p-3 rounded-lg border-l-4 border-l-amber-500">
+                                <div class="flex justify-between font-bold">
+                                    <span>3. AI 感知网关层（支持现场热切换）</span>
+                                    <span class="font-mono text-amber-700">Cloud API ⇄ 本地 Qwen2.5-VL</span>
+                                </div>
+                                <div class="text-sec mt-1">统一 Adapter 抽象接口，只做 OCR、要素抽取、三源冲突比对；输出一律标 <code class="font-mono">[待确认]</code>。</div>
+                            </div>
+
+                            <div class="gov-subtle p-3 rounded-lg border-l-4 border-l-emerald-600">
+                                <div class="flex justify-between font-bold">
+                                    <span>4. 存储与离线交付底座</span>
+                                    <span class="font-mono text-mut">PostgreSQL/SQLite + Docker</span>
+                                </div>
+                                <div class="text-sec mt-1">单机离线安装包（不连外网下载组件），内置一键备份、恢复与全链路审计日志。</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-2.5 border-t border-gov text-[11px] font-mono text-mut flex justify-between">
+                        <span>✔ 现场可秒切开源模型完成补档</span>
+                        <span>✔ 满足等保与政务内网隔离</span>
+                    </div>
+                </div>
+
+                <!-- 【右栏】业务 SOP 与工时账本 (给业务与评委看落地) -->
+                <div class="gov-card rounded-xl p-5 flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between border-b border-gov pb-2.5 mb-4">
+                            <span class="font-bold text-base flex items-center gap-2">
+                                <i class="fa-solid fa-list-check text-pri"></i> 右栏：4 步极简 SOP 与 3,000 份算账
+                            </span>
+                            <span class="text-[11px] font-mono px-2 py-0.5 rounded gov-badge font-bold">非技术人员可操作</span>
+                        </div>
+
+                        <div class="space-y-2.5 text-xs">
+                            <div class="gov-subtle p-3 rounded-lg flex justify-between items-center gap-3">
+                                <div>
+                                    <span class="font-bold">Step 1. 拖入材料 → 自动防重与归宗</span>
+                                    <div class="text-sec mt-0.5">AI 识别文字要素，自动归入已有宗地或新建宗地。</div>
+                                </div>
+                                <span class="font-mono font-bold text-pri shrink-0">AI · 15秒/份</span>
+                            </div>
+
+                            <div class="gov-subtle p-3 rounded-lg flex justify-between items-center gap-3">
+                                <div>
+                                    <span class="font-bold">Step 2. 三源比对 → 70% 常规卷批量过</span>
+                                    <div class="text-sec mt-0.5">合同+登记+缴费一致的(约2,100份)，人工抽检后批量确认。</div>
+                                </div>
+                                <span class="font-mono font-bold text-emerald-600 shrink-0">人 · 45秒/份</span>
+                            </div>
+
+                            <div class="gov-subtle p-3 rounded-lg border-l-4 border-l-amber-500 flex justify-between items-center gap-3">
+                                <div>
+                                    <span class="font-bold">Step 3. 异常拦截 → 30% 冲突卷双屏精核</span>
+                                    <div class="text-sec mt-0.5">涂改/缺页/面积不符(约900份)对照红框改；说不清的挂入<b>《待确认清单》</b>按低值暂算。</div>
+                                </div>
+                                <span class="font-mono font-bold text-amber-700 shrink-0">人 · 3.5分/份</span>
+                            </div>
+
+                            <div class="gov-subtle p-3 rounded-lg flex justify-between items-center gap-3">
+                                <div>
+                                    <span class="font-bold">Step 4. 规则算账 → 发催缴短信 / 导税务单</span>
+                                    <div class="text-sec mt-0.5">程序算出欠款，人工点确认后发短信、导出税务文件（导错一键撤回）。</div>
+                                </div>
+                                <span class="font-mono font-bold text-pri shrink-0">代码 · 1秒</span>
+                            </div>
+                        </div>
+
+                        <!-- 算账公式框 -->
+                        <div class="mt-3 p-3 rounded-lg border border-gov gov-subtle text-xs">
+                            <div class="font-bold text-pri">📐 3,000 份实测工时公式（共 90 小时 = 2人 × 7.5天）：</div>
+                            <div class="font-mono text-[11px] text-sec mt-1">
+                                2,100份×45秒 (26.25h) + 900份×3.5分 (52.5h) + 15%质检缓冲 (11.25h) = 90工时
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-2.5 border-t border-gov text-[11px] font-mono text-mut flex justify-between">
+                        <span>✔ 现场20分钟补档走完全相同4步流</span>
+                        <span>✔ 批量确认准确率 ≥ 99.2%</span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- ==========================================
+         SECTION 05：三平台测试、显卡预算与纸质档案赋码
+         ========================================== -->
+    <section id="governance" class="py-10 px-6">
+        <div class="max-w-7xl mx-auto">
+            <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-6 border-b border-gov pb-3">
+                <div>
+                    <span class="text-xs font-bold px-2 py-0.5 rounded gov-badge">05 · 落地与扩展 (15秒速读)</span>
+                    <h2 class="text-xl md:text-2xl font-bold mt-1">三平台接入测试、本地算力预算与纸质档案柜升级</h2>
+                </div>
+                <span class="text-xs text-mut">从本镇 3,000 份零改动复制到全县各乡镇</span>
+            </div>
+
+            <div class="grid lg:grid-cols-3 gap-5 text-xs">
+                <!-- A -->
+                <div class="gov-card rounded-xl p-5">
+                    <div class="font-bold text-sm mb-2 flex justify-between items-center">
+                        <span>A. 三平台离线数据接入测试</span>
+                        <span class="px-2 py-0.5 rounded gov-badge font-mono">0接口风险</span>
+                    </div>
+                    <ul class="space-y-2 text-sec">
+                        <li>• <b>不动产登记导出表：</b>测宗地号绑定、过户承租人变更识别。</li>
+                        <li>• <b>财政历年缴费/减免表：</b>测跨年票据冲抵、重复导入幂等拦截。</li>
+                        <li>• <b>税务局推送单：</b>测导出字段兼容性，保留历次推送快照。</li>
+                    </ul>
+                </div>
+
+                <!-- B -->
+                <div class="gov-card rounded-xl p-5">
+                    <div class="font-bold text-sm mb-2 flex justify-between items-center">
+                        <span>B. 本地算力卡预算 (跑开源模型)</span>
+                        <span class="px-2 py-0.5 rounded gov-badge font-mono">年运维~4千元</span>
+                    </div>
+                    <ul class="space-y-2 text-sec">
+                        <li>• <b>单镇首选 (¥3.5~5.5万)：</b>1×RTX 4090 (24G)，流畅跑 Qwen2.5-VL-7B。</li>
+                        <li>• <b>全县并发 (¥9~14万)：</b>2×NVIDIA L20 (48G×2)，支撑10+乡镇同时补档。</li>
+                        <li>• <b>全国产信创 (¥16~22万)：</b>鲲鹏 + 2×昇腾 Atlas 300I Duo。</li>
+                    </ul>
+                </div>
+
+                <!-- C -->
+                <div class="gov-card rounded-xl p-5">
+                    <div class="font-bold text-sm mb-2 flex justify-between items-center">
+                        <span>C. 纸质档案室「一宗一码」升级</span>
+                        <span class="px-2 py-0.5 rounded gov-badge font-mono">百元打印机</span>
+                    </div>
+                    <ul class="space-y-2 text-sec">
+                        <li>• <b>打码贴袋：</b>扫描入库自动打印【宗地号+柜盒号】二维码贴档案袋。</li>
+                        <li>• <b>坐标寻址：</b>系统直接显示物理位置（如A室03柜02层），不再翻箱倒柜。</li>
+                        <li>• <b>补档同盒：</b>后续新找到的补充协议按宗地号归入同盒，软硬同步。</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="py-8 px-6 border-t border-gov text-xs text-mut gov-subtle">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div class="font-medium">国有土地租赁智能管理系统 · 一期工程交付与现场补档路演汇报</div>
+            <div class="font-mono">GitHub: Sanshix/fde-land-evidence-demo · ASD STE 100 标准</div>
+        </div>
+    </footer>
+
+    <!-- ==========================================
+         交互脚本：真实工作台模块筛选 + ToG 主题切换
+         ========================================== -->
+    <script>
+        const workbenchModules = [
+            {
+                id: 'mod-supplement',
+                category: 'supplement',
+                badge: '现场补档 40分',
+                title: '1. 多源导入与20分钟补档台',
+                desc: '批量导入乱序图片/PDF、SHA-256防重复入账、自动归并已有宗地或新建宗地、支持单件一键撤回重导。',
+                route: '/',
+                icon: 'fa-file-import'
+            },
+            {
+                id: 'mod-reconcile',
+                category: 'doubt',
+                badge: '存疑判断 15分',
+                title: '2. 双屏证据核验与三源比对',
+                desc: '左屏原件红框高亮定位，右屏结构化表单与登记、缴费表交叉比对，自动拦截涂改、缺页与面积冲突。',
+                route: '/evidence',
+                icon: 'fa-code-compare'
+            },
+            {
+                id: 'mod-doubt-list',
+                category: 'doubt',
+                badge: '存疑判断 15分',
+                title: '3. 待确认清单 (有利原则暂算)',
+                desc: '集中展示存疑事项、暂按对产权人有利算法计算的金额、与其他算法的差额及需主管部门确认的材料。',
+                route: '/doubt-list',
+                icon: 'fa-scale-unbalanced'
+            },
+            {
+                id: 'mod-ledger',
+                category: 'calc',
+                badge: '一期核心数据库',
+                title: '4. 一宗一档电子台账中心',
+                desc: '宗地、承租人、历次合同、租金核算与缴费记录相互关联，支持按区域、状态、欠缴情况多维检索。',
+                route: '/ledger',
+                icon: 'fa-database'
+            },
+            {
+                id: 'mod-rule-engine',
+                category: 'calc',
+                badge: '纯代码算费',
+                title: '5. 租金分段核算规则引擎',
+                desc: '严禁AI推算！纯代码按年期分段与基准地价浮动核算各年度应收，改规则可对历史重算并对比差异。',
+                route: '/rent-calculation',
+                icon: 'fa-calculator'
+            },
+            {
+                id: 'mod-alert-sms',
+                category: 'calc',
+                badge: '一期核心提醒',
+                title: '6. 日历提醒与制式催缴通知',
+                desc: '仿日历分级预警到期与欠缴；按模板生成《催缴通知书》与续期合同，确认后发短信并跟踪缴纳结果。',
+                route: '/notifications',
+                icon: 'fa-calendar-check'
+            },
+            {
+                id: 'mod-tax-export',
+                category: 'calc',
+                badge: '部门文件交换',
+                title: '7. 税务推送单与统计导出',
+                desc: '按税务所需字段生成离线推送单并留存每次快照；提供欠缴、到期与收缴率统计导出。',
+                route: '/tax-export',
+                icon: 'fa-file-csv'
+            },
+            {
+                id: 'mod-ops-model',
+                category: 'ops',
+                badge: '部署运行 25分',
+                title: '8. 模型热切换与备份审计',
+                desc: '现场一键切换云端模型与本地开源模型；完整记录AI结果与人工修改日志；支持数据库一键备份恢复。',
+                route: '/settings',
+                icon: 'fa-sliders'
+            }
+        ];
+
+        let currentFilter = 'all';
+
+        function getBaseUrl() {
+            const input = document.getElementById('workbench-base-url');
+            return (input ? input.value.trim() : 'http://localhost:5173').replace(/\/+$/, '');
+        }
+
+        function renderWorkbenchCards() {
+            const grid = document.getElementById('module-cards-grid');
+            const baseUrl = getBaseUrl();
+            const filtered = currentFilter === 'all'
+                ? workbenchModules
+                : workbenchModules.filter(m => m.category === currentFilter);
+
+            grid.innerHTML = filtered.map(m => {
+                const fullUrl = `${baseUrl}${m.route}`;
+                return `
+                    <div class="gov-card rounded-xl p-5 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between gap-2 mb-3">
+                                <span class="text-[11px] font-bold px-2.5 py-0.5 rounded gov-badge">${m.badge}</span>
+                                <i class="fa-solid ${m.icon} text-mut"></i>
+                            </div>
+                            <h3 class="font-bold text-base mb-1.5">${m.title}</h3>
+                            <p class="text-xs text-sec leading-relaxed mb-4">${m.desc}</p>
+                        </div>
+                        <div class="pt-3 border-t border-gov space-y-2">
+                            <div class="flex items-center gap-1.5 text-[11px] font-mono text-mut">
+                                <span class="shrink-0">子路由:</span>
+                                <input type="text" value="${m.route}" onchange="updateModuleRoute('${m.id}', this.value)"
+                                    class="px-2 py-0.5 rounded border border-gov bg-transparent w-full text-[11px] font-mono">
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 pt-1">
+                                <a href="${fullUrl}" target="_blank"
+                                    class="gov-btn-primary py-2 px-2.5 rounded-lg text-xs font-bold text-center flex items-center justify-center gap-1 shadow-sm">
+                                    <span>直达工作台</span>
+                                    <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                                </a>
+                                <button onclick="openInIframe('${fullUrl}')"
+                                    class="py-2 px-2.5 rounded-lg text-xs font-semibold border border-gov hover:opacity-80 flex items-center justify-center gap-1">
+                                    <i class="fa-solid fa-tv text-[10px] text-pri"></i>
+                                    <span>内嵌投屏</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateModuleRoute(id, newRoute) {
+            const target = workbenchModules.find(m => m.id === id);
+            if (target) {
+                target.route = newRoute.startsWith('/') ? newRoute : '/' + newRoute;
+                renderWorkbenchCards();
+            }
+        }
+
+        function updateWorkbenchLinks() {
+            renderWorkbenchCards();
+        }
+
+        function filterModules(category) {
+            currentFilter = category;
+            document.querySelectorAll('.mod-filter-btn').forEach(btn => {
+                btn.className = 'mod-filter-btn px-4 py-2 rounded-lg text-xs font-medium gov-card';
+            });
+            const activeBtn = document.getElementById('filter-' + category);
+            if (activeBtn) {
+                activeBtn.className = 'mod-filter-btn px-4 py-2 rounded-lg text-xs font-bold gov-btn-primary shadow-sm';
+            }
+            renderWorkbenchCards();
+        }
+
+        function openInIframe(url) {
+            const wrapper = document.getElementById('live-iframe-wrapper');
+            const iframe = document.getElementById('workbench-iframe');
+            const srcLabel = document.getElementById('iframe-current-src');
+            const extLink = document.getElementById('iframe-external-link');
+            const toggleLabel = document.getElementById('iframe-toggle-label');
+
+            wrapper.classList.remove('hidden');
+            iframe.src = url;
+            srcLabel.textContent = url;
+            extLink.href = url;
+            toggleLabel.textContent = '收起页面内嵌真实工作台投屏';
+            wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function toggleLiveIframe() {
+            const wrapper = document.getElementById('live-iframe-wrapper');
+            const iframe = document.getElementById('workbench-iframe');
+            const toggleLabel = document.getElementById('iframe-toggle-label');
+            if (wrapper.classList.contains('hidden')) {
+                openInIframe(getBaseUrl() + '/');
+            } else {
+                wrapper.classList.add('hidden');
+                iframe.src = 'about:blank';
+                toggleLabel.textContent = '展开页面内嵌真实工作台投屏';
+            }
+        }
+
+        function reloadLiveIframe() {
+            const iframe = document.getElementById('workbench-iframe');
+            if (iframe && iframe.src) {
+                iframe.src = iframe.src;
+            }
+        }
+
+        function setGovTheme(themeName) {
+            document.documentElement.setAttribute('data-theme', themeName);
+            const themes = ['gov-blue', 'gov-red', 'gov-dark'];
+            themes.forEach(t => {
+                const btn = document.getElementById('theme-btn-' + t);
+                if (!btn) return;
+                if (t === themeName) {
+                    btn.className = 'px-2.5 py-1.5 rounded-md font-bold transition-all gov-btn-primary shadow-sm';
+                } else {
+                    btn.className = 'px-2.5 py-1.5 rounded-md font-medium transition-all text-sec hover:opacity-80';
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderWorkbenchCards();
+        });
+    </script>
+</body>
+</html>

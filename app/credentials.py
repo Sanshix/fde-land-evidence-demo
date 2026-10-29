@@ -17,7 +17,7 @@ PROJECT_KEYS = {
 BINDINGS = {
     "AI_GUIJILIUDONG_SECRET": "api.siliconflow.cn",
     "AI_ALIYUN_SECRET": "dashscope.aliyuncs.com",
-    "AI_ALIYUN_KEY": ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"),
+    "AI_ALIYUN_KEY": ("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "ws-gii3yuqz050k1sww.cn-beijing.maas.aliyuncs.com"),
     "AI_BAIDU_QIANFAN_API_KEY": "qianfan.baidubce.com",
     "AI_BAIDU_KEY": "aip.baidubce.com",
     "AI_BAIDU_SECRET": "aip.baidubce.com",

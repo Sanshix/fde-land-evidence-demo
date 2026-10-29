@@ -61,7 +61,7 @@ def filtered(rows, street=None, status=None, arrears=None, keyword=None):
 
 
 def reminders(rows, today=AS_OF, horizon_days=90):
-    """分级提醒：红=已到期未续或欠缴≥3个年度；橙=90天内到期或欠缴1-2个年度；黄=30天内到期的预告。"""
+    """分级提醒：红=已到期未续或欠缴≥3个年度；橙=0–30天内到期或欠缴1-2个年度；黄=31–90天内到期的预告。"""
     items = []
     for pub in rows:
         p = pub["payload"]
@@ -71,10 +71,10 @@ def reminders(rows, today=AS_OF, horizon_days=90):
                 "address": p.get("address"), "phone": p.get("phone")}
         if end:
             end_day = date.fromisoformat(end)
-            if ledger.get("合同状态") == "到期未续":
+            if end_day < today and ledger.get("合同状态") != "已解除/收回":
                 items.append({**base, "kind": "合同到期", "level": "红", "date": end,
                               "message": f"合同已于{end}期满未续，仍按原方式计租"})
-            elif today <= end_day <= today + timedelta(days=horizon_days):
+            elif ledger.get("合同状态") != "已解除/收回" and today <= end_day <= today + timedelta(days=horizon_days):
                 level = "橙" if end_day <= today + timedelta(days=30) else "黄"
                 items.append({**base, "kind": "合同到期", "level": level, "date": end,
                               "message": f"合同将于{end}期满，提醒办理续期（期满前三个月提出续租申请）"})
@@ -155,6 +155,11 @@ def ledger_row(pub, names, method):
     }
 
 
+def review_method_label(method):
+    """Keep recorded verification provenance, including non-human test reviews."""
+    return "自动通过" if method == "批量确认" else method or "处理方式未记录"
+
+
 def contract_row(doc):
     f = doc["review"]["fields"]
     row = {"档案号": doc["name"], "页数": len([p for p in doc["pages"] if p.get("path")]) or len(doc["pages"])}
@@ -165,7 +170,7 @@ def contract_row(doc):
     if f.get("start") and f.get("end"):
         start, end = date.fromisoformat(f["start"]), date.fromisoformat(f["end"])
         row["租赁年限"] = round(((end - start).days + 1) / 365.25)
-    row["处理方式"] = "自动通过" if doc["review"].get("method") == "批量确认" else "人工复核"
+    row["处理方式"] = review_method_label(doc["review"].get("method"))
     return {k: row.get(k, "") for k in CONTRACT_COLUMNS}
 
 

@@ -1,0 +1,82 @@
+{
+  "version": "exercise-number-format-v1",
+  "authority": "sample_inferred_not_department_approved",
+  "source_sha256": "b0eccefd85f1866575416e08a4fd06c44cb788297f0b774bf32a0ce7754d28ee",
+  "scope": "Exact simulated prefix and observed years only; no serial-number lookup.",
+  "rules": [
+    {
+      "id": "sample-number-1",
+      "prefix": "××国土租字",
+      "serial_has_di": true,
+      "observed_years": [
+        1998,
+        1999,
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2007
+      ],
+      "brackets": "（）",
+      "enabled": true,
+      "support_count": 20
+    },
+    {
+      "id": "sample-number-2",
+      "prefix": "××国土资租",
+      "serial_has_di": false,
+      "observed_years": [
+        2010,
+        2011,
+        2012,
+        2013,
+        2014,
+        2015,
+        2016,
+        2017,
+        2018
+      ],
+      "brackets": "〔〕",
+      "enabled": true,
+      "support_count": 22
+    },
+    {
+      "id": "sample-number-3",
+      "prefix": "××国土资租变",
+      "serial_has_di": false,
+      "observed_years": [
+        2013
+      ],
+      "brackets": "〔〕",
+      "enabled": true,
+      "support_count": 1
+    },
+    {
+      "id": "sample-number-4",
+      "prefix": "××自然资租",
+      "serial_has_di": false,
+      "observed_years": [
+        2020,
+        2021,
+        2022,
+        2023
+      ],
+      "brackets": "〔〕",
+      "enabled": true,
+      "support_count": 6
+    },
+    {
+      "id": "sample-number-5",
+      "prefix": "××自然资租变",
+      "serial_has_di": false,
+      "observed_years": [
+        2025
+      ],
+      "brackets": "〔〕",
+      "enabled": true,
+      "support_count": 1
+    }
+  ]
+}

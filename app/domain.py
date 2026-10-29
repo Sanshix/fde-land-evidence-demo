@@ -5,6 +5,7 @@ Rules follow 练习集/06_计租标准与核算口径.docx (口径). Section num
 
 import os
 import re
+from contextvars import ContextVar
 from datetime import date
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 
@@ -40,7 +41,7 @@ FIELDS = {
     "note": "手写批注",
 }
 # 文书层面的属性：判断“有/无/缺”本身不一定有可圈定的原文位置，不强制逐字段引用页。
-DOCUMENT_ATTRIBUTES = {"doc_type", "has_map", "missing_pages", "altered_sealed", "note"}
+DOCUMENT_ATTRIBUTES = {"mode", "doc_type", "has_map", "missing_pages", "altered_sealed", "note"}
 DOC_TYPES = {"新签", "续期", "变更"}
 MODES = {"固定", "随标准调整", "未勾选"}
 USES = {"住宅", "商服", "工业", "仓储"}
@@ -63,13 +64,16 @@ ALTERABLE = {
 }
 
 
+POLICY_ROUNDING = ContextVar("policy_rounding", default=None)
+
+
 def rounding_mode():
     """口径写的是“四舍五入到分”（默认 half_up）。
 
     练习集标准答案实际用二进制浮点 round()，在 x.xx5 恰好一半时会舍去（如 1999.125→1999.12）。
     FDE_ROUNDING=answer_key 可复现标准答案，供自测比对；正式口径需主管部门书面确认。
     """
-    return os.environ.get("FDE_ROUNDING", "half_up")
+    return POLICY_ROUNDING.get() or os.environ.get("FDE_ROUNDING", "half_up")
 
 
 def dec(v):
@@ -223,6 +227,8 @@ def validate_fields(f):
     if doc_type == "变更":
         # 口径第十一条：变更协议不附宗地图、不载租金要素；只要求主体和宗地可归属。
         errors = [f"{FIELDS[k]}缺失" for k in sorted(CHANGE_REQUIRED) if not str(f.get(k, "")).strip()]
+        if f.get("altered_field") and clean(f.get("altered_sealed")) not in {"是", "否"}:
+            errors.append("有涂改时须注明涂改处有无手印或盖章（是/否）")
         if f.get("signed"):
             try:
                 date.fromisoformat(f["signed"])

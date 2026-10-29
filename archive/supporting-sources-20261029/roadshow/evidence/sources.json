@@ -1,0 +1,39 @@
+{
+  "read_date": "2026-10-28",
+  "base": "土地租赁合同管理",
+  "sources": [
+    {
+      "path": "国有土地租赁智能管理_赛题需求说明.docx",
+      "sha256": "d7544da4cc5b004b67225bb866313bfb6ba0c78da2e5383b609a65b12d27225a"
+    },
+    {
+      "path": "demo/README.md",
+      "sha256": "75e726da8af038373981fc66d300642f45e579f4e262dd61f8dc13f3c65ba913"
+    },
+    {
+      "path": "demo/runs/验收记录-2026-10-28.md",
+      "sha256": "bc9e886894623574e46d1de9820014ab28c48f005ac39ed2ad39406d35994961"
+    },
+    {
+      "path": "练习集/使用说明.md",
+      "sha256": "f39d3abd3d5df8c7187018fd5b05ff281e5bc217d19e2beb01dbfd0a71bb6ff8"
+    },
+    {
+      "path": "demo/app/main.py",
+      "sha256": "e410de2bea9f21353a84fe296d52721ba8b234fffb2d4e62db0778901002618d"
+    },
+    {
+      "path": "demo/app/auth.py",
+      "sha256": "9f467aaaee66c9be52df558cfaa8f6abd93a12eeffa75b313829415109e5ef8b"
+    },
+    {
+      "path": "demo/app/rules.py",
+      "sha256": "a60788b71ded229ab27f30439af55131c7ddf909c77c59f5cd63da35ed9b2202"
+    },
+    {
+      "path": "demo/app/governance.py",
+      "sha256": "55dc3a31e1532a57ec5276f8c9d7df12d74b00f1334740d59ec7c15003b3b6df"
+    }
+  ],
+  "scope": "只读本地来源；未调用模型或重跑业务后端测试"
+}

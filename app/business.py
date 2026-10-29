@@ -50,8 +50,8 @@ def locate_samples():
 SAMPLES = locate_samples()
 
 
-def read_sheet(name, sheet=None):
-    path = SAMPLES / name
+def read_sheet(name, sheet=None, samples=None):
+    path = (samples or SAMPLES) / name
     if not path.is_file():
         raise FileNotFoundError(f"缺少业务基础表 {path}；请设置 FDE_SAMPLES_DIR 指向练习集/评测集目录")
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -71,13 +71,15 @@ def _text_rows(rows, keys):
     return rows
 
 
-def sources():
-    levels = read_sheet("05_计租标准与土地级别.xlsx", "土地级别范围")
+def sources(samples=None):
+    def load(name, sheet=None):
+        return read_sheet(name, sheet, samples)
+    levels = load("05_计租标准与土地级别.xlsx", "土地级别范围")
     return {
-        "registry": _text_rows(read_sheet("02_不动产登记导出.xlsx"), ["不动产单元号", "证件号码", "联系电话"]),
-        "payments": _text_rows(read_sheet("03_租金缴费记录.xlsx"), ["票据号", "缴费日期", "所属年度"]),
-        "reliefs": read_sheet("04_租金减免登记.xlsx"),
-        "rates": _text_rows(read_sheet("05_计租标准与土地级别.xlsx", "计租标准"), ["执行起始日"]),
+        "registry": _text_rows(load("02_不动产登记导出.xlsx"), ["不动产单元号", "证件号码", "联系电话"]),
+        "payments": _text_rows(load("03_租金缴费记录.xlsx"), ["票据号", "缴费日期", "所属年度"]),
+        "reliefs": load("04_租金减免登记.xlsx"),
+        "rates": _text_rows(load("05_计租标准与土地级别.xlsx", "计租标准"), ["执行起始日"]),
         "levels": levels,
     }
 
@@ -141,22 +143,39 @@ def street_grade(address, streets):
 # ---------------------------------------------------------------- 登记匹配、归宗
 
 def registry_for(fields, source):
-    """Return (registry_row_or_None, basis). Cadastre first; unique 坐落 match is a reviewed fallback."""
-    found = match_registry(fields, source["registry"])
-    if len(found) > 1:
-        raise ValueError("多个登记候选，禁止自动归宗")
-    if found:
-        return found[0], "宗地号"
+    """Identity first, then parcel/tenant, then address. Never choose the first ambiguous row."""
+    registry = [r for r in source["registry"] if r.get("权利性质") == "租赁"]
+    identity = clean(fields.get("identity")).upper()
+    parcel = cadastre(fields.get("parcel_no"))
+    tenant = clean(fields.get("tenant"))
     streets = known_streets(source)
-    key = address_key(fields.get("address"), streets)
-    if key:
-        rows = [
-            r
-            for r in source["registry"]
-            if r.get("权利性质") == "租赁" and address_key(r["坐落"], streets) == key
-        ]
-        if len(rows) == 1:
-            return rows[0], "坐落"
+    # 住所 is a weak fallback; the parcel's 坐落 is more specific when supplied.
+    address = address_key(fields.get("address") or fields.get("residence"), streets)
+    tiers = [
+        ("证件号码", [r for r in registry if identity and clean(r.get("证件号码")).upper() == identity]),
+        ("宗地号", [r for r in registry if parcel and cadastre(r["不动产单元号"]) == parcel]),
+        ("承租人", [r for r in registry if tenant and clean(r.get("权利人")) == tenant]),
+        ("住所／坐落", [r for r in registry if address and address_key(r.get("坐落"), streets) == address]),
+    ]
+    for basis, rows in tiers:
+        if not rows:
+            continue
+        if basis == "证件号码" and parcel:
+            refined = [r for r in rows if cadastre(r["不动产单元号"]) == parcel]
+            if not refined:
+                raise ValueError("证件号码与宗地号匹配结果冲突，请人工核对")
+            rows = refined
+        if len(rows) > 1 and tenant:
+            refined = [r for r in rows if clean(r.get("权利人")) == tenant]
+            if refined:
+                rows = refined
+        if len(rows) > 1 and address:
+            refined = [r for r in rows if address_key(r.get("坐落"), streets) == address]
+            if refined:
+                rows = refined
+        if len(rows) > 1:
+            raise ValueError("多个登记候选，禁止自动归宗")
+        return rows[0], basis
     return None, None
 
 
@@ -190,7 +209,8 @@ def ensure_parcel(db, key):
 
 def linked_parcels(db, fields, exclude=None):
     """Parcels already holding a document that this one cites (原合同编号) or that cites this one."""
-    own, original = clean(fields.get("contract_no")), clean(fields.get("original_contract_no"))
+    from .field_semantics import canonical_identifier
+    own, original = canonical_identifier(fields.get("contract_no")), canonical_identifier(fields.get("original_contract_no"))
     found = set()
     for row in db.execute(
         "SELECT id,parcel_id,review FROM documents WHERE state='published' AND parcel_id IS NOT NULL"
@@ -198,8 +218,8 @@ def linked_parcels(db, fields, exclude=None):
         if row["id"] == exclude or not row["review"]:
             continue
         f = json.loads(row["review"]).get("fields", {})
-        if (original and clean(f.get("contract_no")) == original) or (
-            own and clean(f.get("original_contract_no")) == own
+        if (original and canonical_identifier(f.get("contract_no")) == original) or (
+            own and canonical_identifier(f.get("original_contract_no")) == own
         ):
             found.add(row["parcel_id"])
     return found
@@ -393,12 +413,29 @@ def _run(contracts, factors, picks, source, payments, reliefs):
     choices = [factor["options"][i][1] for factor, i in zip(factors, picks, strict=True)]
     # 新合同整段落在旧合同期内时，“新合同自旧合同期满后生效”会让起始晚于终止：该合同在此算法下不计租
     applied = [c for c in _apply(contracts, choices) if c["fields"]["start"] <= c["fields"]["end"]]
-    return compute(applied, source["rates"], payments, reliefs)
+    from .domain import POLICY_ROUNDING
+    token = POLICY_ROUNDING.set(source.get("policy", {}).get("rounding"))
+    try:
+        return compute(applied, source["rates"], payments, reliefs)
+    finally:
+        POLICY_ROUNDING.reset(token)
 
 
 def calculate_documents(docs, source):
     if not docs:
         return {**compute([], source["rates"]), "documents": [], "recipient": None, "phone": None, "issues": []}
+    import copy
+    docs = copy.deepcopy(docs)
+    replacements = {key: d['id'] for d in docs for key in (d.get('intake') or {}).get('revision_ancestors', [])}
+    events = [{**e, 'documents': [replacements.get(key, key) for key in e['documents']]} for e in source.get('business_events', [])]
+    events = [e for e in events if set(e['documents']) & {d['id'] for d in docs}]
+    for event in events:
+        if event["kind"] == "termination":
+            for d in docs:
+                if d["id"] not in event["documents"]:
+                    continue
+                previous = d["review"].get("stop")
+                d["review"]["stop"] = min(previous, event["stop"]) if previous else event["stop"]
     for doc in docs:
         review = doc["review"]
         if not review or not review.get("evidence_clear"):
@@ -416,6 +453,8 @@ def calculate_documents(docs, source):
     reg = next(iter(regs.values()), None)
     contract_docs = sorted([d for d in docs if _is_contract(d["review"]["fields"])], key=_order_key)
     change_docs = sorted([d for d in docs if not _is_contract(d["review"]["fields"])], key=_order_key)
+    if not contract_docs:
+        raise ValueError("缺关联原合同，无法计租；请补齐原租赁合同后重新核验")
     contracts = [resolve_contract(d, reg["坐落"] if reg else None, streets) for d in contract_docs]
     for c in contracts:
         if normalize_mode(c["fields"]["mode"]) in {"随标准调整", "未勾选"} and c["fields"]["grade"] not in GRADES:
@@ -431,6 +470,7 @@ def calculate_documents(docs, source):
             if r["批准文号"] in review.get("relief_ids", []):
                 selected_reliefs[r["批准文号"]] = r
     payments, reliefs = list(selected_payments.values()), list(selected_reliefs.values())
+    payments += [e["payment"] for e in events if e["kind"] == "payment"]
 
     factors = uncertainty_factors(contracts)
     if len(factors) > 6:
@@ -545,6 +585,7 @@ def calculate_documents(docs, source):
         **result,
         "issues": issues,
         "rate_version": source.get("rate_version", "source-unversioned"),
+        "policy": source.get("policy", {}),
         "documents": sorted(d["id"] for d in docs),
         "recipient": recipient,
         "phone": phone,

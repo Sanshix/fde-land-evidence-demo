@@ -5,12 +5,34 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
+
+operation_role = ContextVar("operation_role", default=None)
+workspace = ContextVar("workspace", default=None)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get("FDE_DATA_DIR", ROOT / "data"))
 DATA.mkdir(parents=True, exist_ok=True)
 DB = DATA / "fde.sqlite"
+
+
+def data_dir():
+    current = workspace.get()
+    return Path(current['data']) if current else DATA
+
+
+def database_file():
+    return data_dir() / 'fde.sqlite' if workspace.get() else DB
+
+
+@contextmanager
+def use_workspace(current):
+    token = workspace.set(current)
+    try:
+        yield
+    finally:
+        workspace.reset(token)
 
 
 def dumps(value):
@@ -23,7 +45,7 @@ def uid():
 
 @contextmanager
 def connection():
-    db = sqlite3.connect(DB, timeout=15)
+    db = sqlite3.connect(database_file(), timeout=15)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys=ON")
     try:
@@ -37,7 +59,7 @@ def connection():
 
 
 def init():
-    if (DATA / "RESTORE_INCOMPLETE").exists():
+    if (data_dir() / "RESTORE_INCOMPLETE").exists():
         raise RuntimeError("恢复未完成的数据目录不可启动；请使用原库或重新恢复到新目录")
     with connection() as db:
         db.execute("PRAGMA journal_mode=WAL")
@@ -55,12 +77,20 @@ def init():
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, actor TEXT NOT NULL,
           action TEXT NOT NULL, target TEXT NOT NULL, payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY,label TEXT NOT NULL,received REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS withdrawal_requests(id INTEGER PRIMARY KEY AUTOINCREMENT, document_id TEXT NOT NULL,
+          version INTEGER NOT NULL, reason TEXT NOT NULL, actor TEXT NOT NULL, created REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending', reviewer TEXT, review_reason TEXT, reviewed REAL);
+        CREATE UNIQUE INDEX IF NOT EXISTS one_pending_withdrawal ON withdrawal_requests(document_id) WHERE status='pending';
+        CREATE TABLE IF NOT EXISTS machine_assessments(document_id TEXT NOT NULL,digest TEXT NOT NULL,
+          rule_version TEXT NOT NULL,payload TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(document_id,digest));
+        CREATE TABLE IF NOT EXISTS routing_assessments(document_id TEXT PRIMARY KEY,document_version INTEGER NOT NULL,
+          processing_state TEXT NOT NULL,confidence_level TEXT NOT NULL,payload TEXT NOT NULL,updated REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS rulesets(id TEXT PRIMARY KEY,payload TEXT NOT NULL,created REAL NOT NULL,actor TEXT NOT NULL,reason TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS notices(id TEXT PRIMARY KEY, publication_id INTEGER NOT NULL REFERENCES publications(id),
           payload TEXT NOT NULL, created REAL NOT NULL);
         """)
-        for table in ("audit", "publications", "notices", "rulesets"):
+        for table in ("audit", "publications", "notices", "rulesets", "machine_assessments"):
             for operation in ("UPDATE", "DELETE"):
                 db.execute(
                     f"CREATE TRIGGER IF NOT EXISTS no_{operation.lower()}_{table} BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'immutable history'); END"
@@ -90,18 +120,33 @@ def init():
         db.execute(
             "CREATE TABLE IF NOT EXISTS review_drafts(document_id TEXT PRIMARY KEY,version INTEGER NOT NULL,payload TEXT NOT NULL,actor TEXT NOT NULL,at REAL NOT NULL)"
         )
+        job_columns = {r[1] for r in db.execute("PRAGMA table_info(jobs)")}
+        for name, kind in (("actor", "TEXT"), ("role", "TEXT"), ("requested_at", "REAL")):
+            if name not in job_columns:
+                db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {kind}")
         db.execute("PRAGMA user_version=6")
+        from .workbench import initialize
+        initialize(db)
+        from .approval import initialize as initialize_approval
+        initialize_approval(db)
         # Interrupted work is visible and resumable; never silently marked successful.
         db.execute(
-            "UPDATE jobs SET state='interrupted',error='进程中断，可显式重试或人工接管' WHERE state='running'"
+            "UPDATE jobs SET state='interrupted',error='进程中断，可显式重试或人工接管' WHERE state IN ('running','fallback_running')"
         )
         db.execute("UPDATE documents SET state='needs_human' WHERE state='recognizing'")
+        duplicates = db.execute(
+            "SELECT document_id FROM jobs WHERE state IN ('queued','running','fallback_queued','fallback_running') "
+            "GROUP BY document_id HAVING COUNT(*) > 1").fetchall()
+        if duplicates:
+            raise RuntimeError(f"存在 {len(duplicates)} 份合同含重复活动任务，请先核对任务记录；未自动删除任务")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_job_per_document ON jobs(document_id) "
+                   "WHERE state IN ('queued','running','fallback_queued','fallback_running')")
 
 
 def audit(db, actor, action, target, payload):
     db.execute(
         "INSERT INTO audit(at,actor,action,target,payload) VALUES(?,?,?,?,?)",
-        (time.time(), actor, action, target, dumps(payload)),
+        (time.time(), actor, action, target, dumps({**payload, "operation_role": operation_role.get()})),
     )
 
 

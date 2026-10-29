@@ -1,0 +1,33 @@
+async page=>{
+ const results=[],errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const assert=(name,ok)=>{results.push({name,passed:!!ok});if(!ok)throw Error(name)};
+ const settle=()=>page.waitForFunction(()=>!operationBusy);
+ const click=async s=>{await page.locator(s).click();await settle()};
+ const choose=async (s,v)=>page.locator(s).selectOption(v,{force:true});
+ const json=async p=>(await page.request.get('http://127.0.0.1:8882'+p)).json();
+ await click('[data-tab="rent"]');await page.locator('#rent-content summary').first().click();
+ const before=(await json('/api/ledger'))[0];
+ await page.locator('[data-business-event="payment"]').first().click();await page.locator('#action-dialog[open]').waitFor();
+ const status=await json('/api/status');await choose('#dialog-evidence_document',status.documents.find(d=>d.state==='published').id);
+ for(const [k,v]of Object.entries({date:'2026-09-01',reason:'合成缴费凭证测试',amount:'10',year:'2026',receipt:'UI-PAY-'+Date.now()}))await page.locator('#dialog-'+k).fill(v);
+ await page.locator('#action-submit').click();await page.waitForFunction(()=>document.querySelector('#action-dialog h2')?.textContent.includes('确认逐年'));
+ await click('#action-submit');const after=(await json('/api/ledger'))[0];
+ assert('payment_increases_paid_10',Number(after.payload.paid)===Number(before.payload.paid)+10);
+ assert('payment_reduces_arrears_10',Number(after.payload.arrears)===Number(before.payload.arrears)-10);
+ await click('[data-tab="notices"]');await click('[data-make-notice]');
+ const notice=(await json('/api/notices'))[0];assert('notice_uses_current_arrears',Number(notice.arrears)===Number(after.payload.arrears));
+ await choose('[data-notice-status]','已审核');await page.locator('#dialog-note').fill('合成通知审核测试');await click('#action-submit');
+ assert('notice_reviewed',(await json('/api/notices'))[0].status==='已审核');
+ await page.locator('[data-send-notice]').first().click();await choose('#dialog-outcome','success');await click('#action-submit');
+ assert('missing_notice_settings_prevent_send',(await json('/api/notices/'+notice.id+'/tasks')).length===0);
+ await click('[data-tab="tax"]');await page.locator('#tax-year').fill('2026');await choose('#tax-quarter','3');
+ await page.locator('#tax-push').click();await page.locator('#action-dialog[open]').waitFor();await click('#action-submit');
+ assert('tax_archived',(await json('/api/tax-pushes')).some(t=>t.period==='2026年第3季度'));
+ await click('[data-tab="contracts"]');await page.locator('[data-business-event="termination"]').first().click();
+ await choose('#dialog-evidence_document',status.documents.find(d=>d.state==='published').id);
+ await page.locator('#dialog-date').fill('2026-06-30');await page.locator('#dialog-reason').fill('合成终止证据测试');
+ await page.locator('#action-submit').click();await page.waitForFunction(()=>document.querySelector('#action-dialog h2')?.textContent.includes('确认逐年'));await click('#action-submit');
+ const terminated=(await json('/api/ledger'))[0];assert('terminated_status',terminated.payload.status==='已解除/收回');assert('terminated_due_reduced',Number(terminated.payload.due)<Number(after.payload.due));
+ await page.screenshot({path:'output/playwright/full-chain-20261029-business.png',fullPage:true});assert('no_runtime_errors',errors.length===0);
+ return{results,errors};
+}

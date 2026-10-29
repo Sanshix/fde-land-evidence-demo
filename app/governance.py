@@ -1,6 +1,7 @@
 """Source-aware extraction and explicit data quality states; no ground-truth access."""
 
 import hashlib
+import os
 import re
 import unicodedata
 from datetime import date
@@ -42,6 +43,38 @@ def issue_id(problem):
 
 def normalize(key, raw):
     text = unicodedata.normalize("NFKC", str(raw)).strip().strip("：:；;。")
+    if os.environ.get("FDE_FIELD_CLEANUP", "1") == "1":
+        if key == "tenant":
+            text = re.sub(r"^\s*[（(]?乙方[)）]?\s*[:：]?\s*", "", text)
+            text = re.split(r"证件号码|联系电话|住所[:：]", text)[0].strip()
+        if key == "identity":
+            text = re.split(r"联系电话|联系号码|电话[:：]", text)[0].strip()
+        if key in {"area", "annual"}:
+            # Unit exponents are not additional numeric observations.
+            text = re.sub(r"(?:m|M)\s*(?:\^\s*)?2|㎡", "平方米", text)
+        if key in {"start", "end", "signed"}:
+            from .extraction import CN_DATE, cn_date
+            text = re.sub(r"签订日期[:：]?", "", text).strip()
+            observed = []
+            for match in re.finditer(CN_DATE, text):
+                value = cn_date(match)
+                if value:
+                    observed.append(value)
+            numeric_date = r"(\d{4})[./-](\d{1,2})[./-](\d{1,2})"
+            for match in re.finditer(numeric_date, text):
+                try:
+                    observed.append(date(*map(int, match.groups())).isoformat())
+                except ValueError:
+                    return [text]
+            remainder = re.sub(CN_DATE, "", text)
+            remainder = re.sub(numeric_date, "", remainder).strip(" ,，;；:：|\t\n")
+            if observed and len(set(observed)) == 1 and not remainder:
+                return [observed[0]]
+        if key == "doc_type":
+            from .extraction import document_type_observation
+            value, _ = document_type_observation([text])
+            if value:
+                return [value]
     if key in {"area", "annual"}:
         # Preserve signs: turning a source '-120' into '+120' invents a fact.
         values = re.findall(r"(?<![\d.])[-+−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", text)
@@ -64,7 +97,8 @@ def normalize(key, raw):
             return []
         if text in {"固定", "随标准调整"}:
             return [text]
-        return []
+        from .field_semantics import explicit_modes
+        return explicit_modes(text)
     return [text] if text else []
 
 
@@ -111,7 +145,11 @@ def native_candidates(units):
                     normalized_input = normalized_input.split("T")[0]
                 loc += " + " + following["locator"]
                 evidence += " | " + text
-            for normalized in normalize(key, normalized_input):
+            normalized_values = normalize(key, normalized_input)
+            if os.environ.get("FDE_FIELD_CLEANUP", "1") == "1" and key in {"area", "annual"} and len(normalized_values) > 1:
+                # More than one number is an ambiguity, not several isolated facts.
+                normalized_values = []
+            for normalized in normalized_values:
                 if not normalized or re.search(r"【.*?】|待填写|待确认", normalized):
                     continue
                 out[key].append(
@@ -175,11 +213,29 @@ def issues_for(doc):
     return issues
 
 
+def validate_alteration_review(doc, body):
+    review = body.get("alteration_review")
+    if review is None:
+        return []  # Existing API callers still record their decision via fields + staff confirmation.
+    if not isinstance(review, dict):
+        return ["签章核验记录格式无效"]
+    if not (body.get("fields") or {}).get("altered_field"):
+        return []
+    if review.get("decision") not in {"present", "absent"}:
+        return ["涂改处签章尚无法判断，请挂起并补充核验"]
+    if review.get("unit_id") not in {p["id"] for p in doc["pages"]}:
+        return ["签章核验须选择当前文书的原件页"]
+    expected = "是" if review["decision"] == "present" else "否"
+    if (body.get("fields") or {}).get("altered_sealed") != expected:
+        return ["签章核验结论与采纳字段不一致"]
+    return []
+
+
 def validate_completeness(doc, body):
     intake = doc.get("intake") or {}
     if intake.get("technical_status") == "failed":
         return ["资料解析失败/不支持，需补件或转换格式；不能标记完整"]
-    errors = []
+    errors = validate_alteration_review(doc, body)
     if not body.get("material_complete"):
         errors.append("请独立核对页/表/单元格与嵌入图清单完整性")
     if not body.get("confirm_calculation"):
@@ -228,6 +284,13 @@ def validate_citations(doc, body):
 
 def parse_ocr_text(text, page, profile):
     """Separate observed OCR protocol markers from visible numeric facts; retain raw output."""
+    from .deterministic_parser import parse_text
+
+    return parse_text(text, page, profile)
+
+
+def legacy_parse_ocr_text(text, page, profile):
+    """Pre-admission parser retained for explicit offline diagnosis, never selected implicitly."""
     lines, seen, markers, repeated = [], set(), 0, 0
     for index, raw in enumerate(text.splitlines(), 1):
         clean_line, count = re.subn(r"<\|LOC_\d+\|>", "", raw)
@@ -244,7 +307,7 @@ def parse_ocr_text(text, page, profile):
                 kind="ocr",
                 model=profile["model_id"],
                 provider=profile["provider"],
-                score=0,
+                score=None,
                 score_meaning="not_provided",
                 source_locator=None,
                 response_locator=candidate["source_locator"],

@@ -1,0 +1,674 @@
+[
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 320
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 768
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1024
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "blue",
+    "width": 1440
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 320
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 768
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1024
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "navy",
+    "width": 1440
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 320
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 768
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 136,
+    "overflow": false,
+    "page": "05 技术架构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1024
+  },
+  {
+    "chars": 83,
+    "overflow": false,
+    "page": "01 项目价值 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "02 业务现状 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 130,
+    "overflow": false,
+    "page": "03 流程重构 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 116,
+    "overflow": false,
+    "page": "04 补档演示 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 144,
+    "overflow": false,
+    "page": "06 治理控制 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 169,
+    "overflow": false,
+    "page": "07 验证证据 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  },
+  {
+    "chars": 140,
+    "overflow": false,
+    "page": "08 落地路径 · 国有土地租赁智能管理系统",
+    "theme": "paper",
+    "width": 1440
+  }
+]

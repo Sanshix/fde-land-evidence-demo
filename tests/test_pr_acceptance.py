@@ -87,7 +87,8 @@ def test_payment_claim_checked_again_at_commit_and_released_on_withdrawal(client
     assert rejected.status_code == 400 and "禁止重复抵扣" in rejected.text
     assert len(client.get("/api/ledger").json()) == 1
     current = client.get(f"/api/documents/{first['id']}").json()
-    assert client.post(f"/api/documents/{first['id']}/withdraw",
+    from test_api import approved_withdraw
+    assert approved_withdraw(client, first['id'],
                        json={"version": current["version"], "reason": "Correct wrong parcel assignment"},
                        headers=HEAD).status_code == 200
     second_body = preview(client, second, review_body(second, parcel(2)))

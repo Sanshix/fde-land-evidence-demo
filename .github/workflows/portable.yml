@@ -1,0 +1,37 @@
+name: 一键构建 Windows 和 Linux 离线部署包
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.in pyinstaller==6.16.0
+      - run: python scripts/build_portable.py --output portable-build
+      - run: python scripts/smoke_portable.py portable-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.os }}
+          path: portable-build/*.zip
+          if-no-files-found: error
+  delivery:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: portable-*
+          merge-multiple: true
+          path: delivery
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FDE-Windows-Linux-离线部署包
+          path: delivery/*.zip
+          if-no-files-found: error

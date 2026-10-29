@@ -49,4 +49,18 @@ def source_for(db, base):
     row = db.execute(
         "SELECT r.id,r.payload FROM rulesets r JOIN settings s ON s.value=r.id WHERE s.key='active_ruleset'"
     ).fetchone()
-    return {**base, "rates": json.loads(row["payload"]), "rate_version": row["id"]} if row else base
+    from .workbench import event_source
+    payload = json.loads(row["payload"]) if row else base["rates"]
+    rates = payload["rates"] if isinstance(payload, dict) else payload
+    policy = validate_policy(payload.get("policy")) if isinstance(payload, dict) else validate_policy()
+    return event_source(db, {**base, "rates": rates, "policy": policy, "rate_version": row["id"] if row else "source"})
+
+
+def validate_policy(value=None):
+    from .domain import rounding_mode
+    policy = {"segmentation": "calendar_month", "relief": "approved_source", "uncertainty": "minimum_due", "rounding": rounding_mode()}
+    policy.update(value or {})
+    allowed = {"segmentation": {"calendar_month"}, "relief": {"approved_source"}, "uncertainty": {"minimum_due"}, "rounding": {"half_up", "answer_key"}}
+    if set(policy) != set(allowed) or any(policy[k] not in values for k, values in allowed.items()):
+        raise ValueError("不支持的核算政策；只允许已实现并验证的策略")
+    return policy

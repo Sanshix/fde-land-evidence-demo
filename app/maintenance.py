@@ -115,7 +115,7 @@ def restore_backup(source, destination):
                 "UPDATE jobs SET run_path=? WHERE id=?", (relocated(text, require_file=False), identifier)
             )
         db.execute(
-            "UPDATE jobs SET state='interrupted',error='备份恢复后需显式复核/重试' WHERE state IN ('running','queued')"
+            "UPDATE jobs SET state='interrupted',error='备份恢复后需显式复核/重试' WHERE state IN ('running','queued','fallback_running','fallback_queued')"
         )
         db.execute("UPDATE documents SET state='needs_human' WHERE state IN ('recognizing','queued')")
         db.commit()

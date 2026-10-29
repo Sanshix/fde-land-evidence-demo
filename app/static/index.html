@@ -1,37 +1,379 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#142b49"><title>国有土地租赁智能管理平台</title><link rel="stylesheet" href="/static/style.css?v=20261028-workbench1"></head>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#183247"><title>国有土地租赁智能管理平台</title><link rel="stylesheet" href="/static/style.css?v=20261029-highend-models"></head>
 <body>
+<a class="skip-link" href="#main-content">跳到主内容</a>
 <aside class="sidebar"><a class="brand" href="/" aria-label="国有土地租赁智能管理平台首页"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 10 16 4l12 6-12 6L4 10Z" stroke="currentColor" stroke-width="1.7"/><path d="m4 16 12 6 12-6M4 22l12 6 12-6M16 16v12" stroke="currentColor" stroke-width="1.7"/></svg></span><span class="brand-name"><span>国有土地租赁</span><span>智能管理平台</span></span></a>
-<div class="nav-label">业务工作台</div>
-<nav aria-label="主导航"><button class="active" data-tab="inbox" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 3h9v10H3V7Zm0 0V4h7l2 3h7v3"/></svg><span>材料管理</span></button><button data-tab="governance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6v4H9zM9 6H5v15h14V6h-4M8 12h5m-5 4h3m4 0 1 1 3-4"/></svg><span>待办事项</span></button><button data-tab="review"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 21H5V3h10l4 4v4M14 3v5h5"/><circle cx="16" cy="16" r="4"/><path d="m19 19 3 3M8 12h3m-3 4h2"/></svg><span>材料核对</span></button><button data-tab="ledger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5Zm6-2v16m6-14v16"/></svg><span>宗地台账</span></button><button data-tab="measure"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v18h17M8 16v-5m5 5V6m5 10V9"/></svg><span>系统管理</span></button></nav>
-<div class="sidebar-bottom"><dl><dt>业务核算日</dt><dd>2026.09.30</dd></dl></div><div class="sidebar-footer">原件可追溯 · 核算有依据</div></aside>
-<main><div class="topbar"><div class="breadcrumb">业务工作台<span>/</span><b id="breadcrumb-current">材料管理</b></div><div class="topbar-meta"><span>国有土地资产管理</span></div></div><div class="workspace"><header><div><div class="page-heading"><h1 id="title" tabindex="-1">材料管理</h1><button id="open-upload" class="primary" aria-controls="intake">上传材料</button></div><p id="page-description" class="page-description">统一归集租赁材料，跟进识别任务与人工核验进度。</p></div><div class="identity"><span class="avatar" aria-hidden="true">经</span><label>经办人<input id="actor" value="本机经办员" aria-label="经办人"></label><label>角色<select id="role" aria-label="角色"><option value="reviewer">经办员</option><option value="viewer">只读观察员</option><option value="admin">管理员</option></select></label></div></header>
-<div class="notice system-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><div><b>核对后再登记</b><span>系统提取结果仅供参考，租金按计租租金核算。当前角色选择不等于正式账号权限。</span></div><span class="notice-label">业务提示</span></div>
-<div id="connection-status" class="error" role="status" hidden></div><div id="toast" role="status" aria-live="polite"></div>
-<section id="inbox" class="tab"><div id="stats" class="stats"></div>
-<div class="card queue-card"><div class="section-head"><div class="section-title"><h2>材料列表</h2><span id="document-count" class="count-badge">0 份文书</span></div><div class="list-actions"><button id="all-documents" aria-pressed="true">全部材料</button><button id="refresh"><span aria-hidden="true">↻</span> 刷新列表</button></div></div><p id="filter-description" class="muted" aria-live="polite">全部材料</p><div id="documents" class="table-scroll"></div></div>
-<details id="intake" class="card"><summary>上传材料与批量上传</summary><div class="grid2 intake-grid"><div class="card import-card"><div class="section-head"><div class="section-title"><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 14v7h16v-7"/></svg></span><h2>上传材料</h2></div><span class="tag">自动识别，人工核对</span></div><p>同一份合同支持组合上传，保留原件及对应证据位置。</p>
-<form id="upload"><label for="name">档案名称 <span class="required">*</span></label><input id="name" required placeholder="请输入档案名称，例如：补档-2026-01"><label class="drop" for="files"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H5V3h2Zm7 0v6h5M12 18v-6m-3 3 3-3 3 3"/></svg></span><b>选择需要归档的文书材料</b><span>图片、PDF、Word、Excel · 支持多文件组合</span><input type="file" id="files" multiple accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx,.doc,.xls,.docm,.xlsm" required><span id="file-summary" class="file-summary" aria-live="polite">尚未选择文件</span></label><div class="import-footer"><span>旧 DOC / XLS 仅存证，不解析</span><button class="primary">上传并处理</button></div></form></div>
-<div class="card batch-card"><div class="section-head"><div><h2>批量上传</h2><p>按文书批量归档，跟踪整包处理进度。</p></div><span class="tag neutral">ZIP 批量导入</span></div><form id="batch-upload"><input id="batch-file" type="file" accept=".zip" required aria-label="补档ZIP"><button>上传 ZIP 文件</button></form><p class="batch-note">每个子文件夹为一份文书，或使用 LX-017_1.jpg 页码命名。计时包含识别与人工发布；有失败或挂起不计为全部通过。</p><div id="batches"></div></div>
-</div></details><details class="card usage-guide"><summary>使用示例与说明</summary><div class="workflow"><div class="workflow-label"><b>业务办理流程</b><span>全过程证据留痕</span></div><ol><li><span>01</span><div><b>材料归档</b><small>保存原件 / 提取信息</small></div></li><li><span>02</span><div><b>证据核验</b><small>对照原件 / 填写信息</small></div></li><li><span>03</span><div><b>租金核算</b><small>资料匹配 / 差异复核</small></div></li><li><span>04</span><div><b>登记台账</b><small>人工确认 / 历史可溯</small></div></li></ol></div>
-<div class="card sample-card"><div class="section-head"><div class="section-title"><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5zM8 7h8m-8 4h8m-8 4h4"/></svg></span><h2>典型问题样例</h2></div><span class="tag neutral">开发样张</span></div><p>选择典型文书，查看证据核验与异常处理流程。</p><div class="examples"><button data-sample="LX-017"><span class="sample-id">LX-017 <span aria-hidden="true">↗</span></span><b>面积涂改</b><span>无签章修改</span></button><button data-sample="LX-018"><span class="sample-id">LX-018 <span aria-hidden="true">↗</span></span><b>未勾选计租方式</b><span>拍照 / 折角</span></button><button data-sample="LX-001"><span class="sample-id">LX-001 <span aria-hidden="true">↗</span></span><b>模糊与金额涂改</b><span>历史合同</span></button><button data-sample="LX-034"><span class="sample-id">LX-034 <span aria-hidden="true">↗</span></span><b>金额大小写不同</b><span>租金核算</span></button></div><div class="sample-note">样张已用于开发，不作为盲测结果；不读取标准答案。</div></div></details></section>
-<section id="governance" class="tab hidden"><div class="section-head"><div><h2>待办事项</h2><p>集中处理识别失败、资料缺失和待确认事项。系统提取结果仅供参考，请对照原件核实。</p></div><button id="refresh-governance">刷新待办</button></div><div class="card"><div class="section-head"><h2>分流与批量确认</h2><button id="batch-refresh">重新分流</button></div><p>候选一致且证据完整的材料，仍须逐份核对原件、完整性与核算后批量确认；含弱匹配或疑点的材料进入逐项人工复核。</p><div id="batch-list"></div><label class="check"><input id="batch-reviewed" type="checkbox">我已逐份核对本批全部采纳值的原件证据、资料完整性、缴费归集和逐年核算</label><button id="batch-confirm" class="primary" disabled>批量确认</button></div><div class="card"><label>问题类别<select id="governance-filter"><option value="">全部待办</option><option>识别问题</option><option>原件问题</option><option>业务冲突</option><option>未完成</option><option>待确认</option></select></label><div id="governance-list"></div></div></section>
-<section id="review" class="tab hidden"><div id="empty-review" class="empty"><b>选择一份材料开始核对</b><small>识别失败时，也可以对照原件手动填写。</small><button id="go-pending" class="primary">前往待办事项</button></div><div id="review-content" class="hidden">
-<div class="review-top"><div><h2 id="doc-name"></h2><div id="doc-meta"></div></div><div><button id="reload-doc">重新加载材料</button><button id="retry">重新识别</button></div></div>
-<p id="document-update" class="notice" hidden>材料处理进度已更新。当前输入保持不变，可点击“重新加载材料”查看最新结果。</p><div id="governance-status" class="notice"></div><details id="attachments" class="card"><summary>资料清单与补充材料（原件不覆盖）</summary><div id="inventory"></div><p>补件保留原件，但会使旧草稿、确认和核算预览失效，需要重新核对。</p><form id="attach-form"><input id="attach-files" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx,.doc,.xls" aria-label="补充材料"><button>上传补充材料</button></form></details>
-<form id="merge-form"><label>本文书其实是另一份文书的某几页（补档命名/分组不整齐时）<select id="merge-target" aria-label="并入目标"></select></label><button>并入所选文书</button></form><div class="review-navigation"><div class="review-status" role="status"><span id="draft-state"></span><span id="preview-state"></span></div><div class="review-links" aria-label="复核定位"><button data-jump="review-stage-0">核对事实</button><button data-jump="review-stage-1">处理问题</button><button data-jump="review-stage-2">匹配与核算</button><button data-jump="review-stage-3">确认登记</button></div><details><summary id="remaining-count">登记前待办</summary><div id="remaining-items"></div></details></div><div class="review-grid"><div class="image-panel"><div class="toolbar"><select id="page-select" aria-label="原件页"></select><button id="rotate">旋转90°</button><button id="previous">调整页序：向前移动</button><a id="download-original" class="button">下载原件</a></div><div class="image-scroll"><div id="native-evidence" class="hidden"></div><div id="image-wrap"><img id="original" alt="合同原件"><svg id="overlay" aria-label="字段证据区域"></svg></div></div><p class="caption">原件优先。原生文档使用实际段落/单元格位置，不伪造页码；页面调整会使旧证据确认失效。</p></div>
-<div class="field-panel"><div class="section-head"><h2>核对并填写材料信息</h2><span class="tag amber">逐项复核</span></div><h3 class="review-section" id="review-stage-0" tabindex="-1">核对事实</h3><label class="check"><input id="show-suggestions" type="checkbox">查看系统提取结果（仅供参考）</label><label>将原文关联到<select id="evidence-field" aria-label="引用目标字段"></select></label><div id="fields"></div><datalist id="uses"><option>住宅</option><option>商服</option><option>工业</option><option>仓储</option></datalist><datalist id="grades"><option>一级</option><option>二级</option><option>三级</option><option>四级</option></datalist><datalist id="modes"><option>固定</option><option>随标准调整</option></datalist>
-<details class="context-box"><summary>哪些信息需要核实</summary><p>上下文模型的建议必须给出原文证据和可核对说明；不能代替看不清的金额、面积、主体和日期。未配置的模型明确跳过，无法核实须补充清晰材料。</p></details>
-<label>核对说明<textarea id="reason" placeholder="说明查看了哪一页、如何排除歧义。不能用“金额合算”替代原文事实。"></textarea></label><label>暂算或待主管部门确认事项<textarea id="uncertainty" placeholder="若资料存在业务多解，写明各方案、差额与需要的材料；无法辨认原文请直接挂起。"></textarea></label><label>有解除/收回证据的停止计租日（可空）<input id="stop-date" type="date"></label>
-<button id="save-draft">保存草稿</button><h3 class="review-section" id="review-stage-1" tabindex="-1">处理问题</h3><div id="risks"></div><div id="quality-resolutions"></div><h3 class="review-section" id="review-stage-2" tabindex="-1">匹配与核算</h3><button id="preview" class="primary">核对登记、缴费与减免，预览租金</button><div id="matching"></div><p id="calculation-status" class="notice" role="status" hidden>材料或缴费选择已修改，以下为上次预览。请重新预览租金后再登记。</p><div id="calculation"></div>
-<h3 class="review-section" id="review-stage-3" tabindex="-1">确认登记</h3><label class="check"><input id="material-clear" type="checkbox">我已核对全部页、工作表、隐藏内容和嵌入图，确认资料完整或已记录排除依据</label><label class="check"><input id="evidence-clear" type="checkbox">我已对照原件核验所有采纳值；不存在靠猜测补齐的关键事实</label><label class="check"><input id="payments-clear" type="checkbox">我已核对本宗地登记、缴费与减免选择，没有以姓名直接归宗</label>
-<label class="check"><input id="calculation-clear" type="checkbox">我已完成第二道核算复核，检查逐年依据、金额和缴费归集</label><div id="confirm-requirements" class="requirements" aria-live="polite"></div><div class="actions"><button aria-describedby="confirm-requirements" id="confirm" class="primary" disabled>确认并登记台账</button><button id="hold" class="warning">转为待补件</button></div><details class="secondary-actions"><summary>其他操作</summary><p>撤回后，本份材料不再参与台账核算，系统将重新计算；原件和历史记录保留。请先在“核对说明”中填写原因。</p><button id="withdraw" class="danger">撤回登记</button></details><details><summary>修改与处理记录</summary><pre id="audit"></pre></details></div></div></div></section>
-<section id="ledger" class="tab hidden"><div class="section-head"><div><h2>一宗一档台账</h2><p>只显示人工确认发布的快照。撤回和重算保留历史。</p></div><a href="/api/export" class="button">导出业务 CSV（ZIP）</a><a href="/api/stats?format=csv" class="button">导出统计</a></div>
-<div id="stats-panel" class="stats"></div>
-<div class="card"><div class="section-head"><h2>到期与欠缴提醒</h2><a class="button" href="/api/reminders?format=ics">导入日历（.ics）</a></div><div id="reminder-list"></div></div>
-<form id="ledger-filter" class="card filters"><label>街路<input id="f-street" placeholder="如 繁荣路"></label><label>合同状态<select id="f-status"><option value="">全部</option><option>有效</option><option>到期未续</option><option>已解除/收回</option></select></label><label>欠缴<select id="f-arrears"><option value="">全部</option><option>欠缴</option><option>未欠缴</option></select></label><label>关键字<input id="f-keyword" placeholder="姓名/坐落/单元号"></label><button>查询</button></form>
-<div id="notice-preview"></div><div id="ledger-content"></div>
-<div class="card"><h2>催缴跟踪</h2><div id="notice-list"></div></div>
-<div class="card"><div class="section-head"><h2>税务推送单（文件交换，留存每期）</h2><span><input id="tax-year" type="number" value="2026" min="1998" max="2026" aria-label="年度"><select id="tax-quarter" aria-label="季度"><option value="1">第一季度</option><option value="2">第二季度</option><option value="3" selected>第三季度</option><option value="4">第四季度</option></select><button id="tax-push">生成并留存</button></span></div><div id="tax-list"></div></div></section>
-<section id="measure" class="tab hidden"><div class="card"><h2>识别状态</h2><p>这里展示实际模型/时间/失败记录，不将缓存或人工录入视作实时识别。当前尚未完成全量准确率、整包20分钟和真实人工耗时测量。</p><p id="model-summary"></p><details><summary>模型配置与技术记录</summary><div id="model-status"></div></details></div><div class="card" data-admin><h2>数据备份</h2><button id="backup">备份数据库与原件（管理员）</button><pre id="backup-result"></pre></div><div class="card" data-admin><h2>计租标准</h2><p>仅管理员可发布。原核算政策保持06-v1；费率表变更先查看逐宗差异，历史通知保持原版本。</p><button id="read-rules">读取当前费率</button><details><summary>编辑计租费率（高级）</summary><textarea id="rates-json" rows="8" aria-label="计租费率JSON" placeholder="读取后编辑费率；必须提供正式来源依据"></textarea></details><label>规则变更依据<input id="rule-reason"></label><button id="preview-rules">预览全部宗地差异</button><label class="check"><input id="rule-calculation-clear" type="checkbox">我已按本次新规则复核逐宗差异；不沿用旧核算确认</label><button id="confirm-rules" disabled>确认规则并发布重算</button><pre id="rule-impact"></pre></div><p id="admin-hint" class="muted">计租标准调整与数据备份仅向管理员展示。</p><details class="card"><summary>任务日志</summary><div id="jobs" class="table-scroll"></div></details></section>
-</div><footer class="main-footer"><span>国有土地租赁智能管理平台</span><span>原件留存 · 人工核对 · 租金核算</span></footer></main><dialog id="unsaved-dialog" aria-labelledby="unsaved-title"><h2 id="unsaved-title">材料修改尚未保存</h2><p>保存为草稿后可继续处理，不会登记到台账。</p><p id="unsaved-error" class="error" role="alert" hidden></p><div class="actions"><button id="unsaved-save" class="primary">保存后继续</button><button id="unsaved-discard">放弃修改</button><button id="unsaved-cancel" autofocus>取消</button></div></dialog><script src="/static/controls.js?v=20261028-workbench1"></script><script src="/static/app.js?v=20261028-workbench1"></script><datalist id="doc-types"><option>新签</option><option>续期</option><option>变更</option></datalist><datalist id="yes-no"><option>是</option><option>否</option></datalist></body></html>
+<div class="nav-label" aria-hidden="true"></div>
+<nav aria-label="主导航"><button data-tab="inbox"><span>存量合同治理与新合同上传</span></button><button data-tab="ledger"><span>一宗一档电子台账</span></button><button data-tab="rent"><span>租金核算</span></button><button data-tab="reminders"><span>到期与欠缴提醒</span></button><button data-tab="notices"><span>催缴通知</span></button><button data-tab="contracts"><span>合同生成与续期变更</span></button><button data-tab="tax"><span>税务推送单</span></button><button data-tab="statistics"><span>统计查询</span></button><button data-tab="measure"><span>系统管理</span></button></nav>
+<div class="sidebar-bottom"><dl><dt>业务核算日</dt><dd>2026.09.30</dd></dl>
+</div>
+<div class="sidebar-footer">原件可追溯 · 核算有依据</div>
+</aside>
+<main id="main-content" tabindex="-1">
+<div class="topbar">
+<div class="breadcrumb">业务工作台<span>/</span><b id="breadcrumb-current">合同管理</b>
+</div>
+<div class="topbar-meta"><span>国有土地资产管理</span>
+</div>
+</div>
+<div class="workspace">
+<header>
+<div>
+<div class="page-heading">
+<h1 id="title" tabindex="-1">合同管理</h1><button id="open-upload" class="primary" aria-controls="intake">上传材料</button>
+</div>
+<p id="page-description" class="page-description">统一归集租赁材料，跟进识别任务与人工核验进度。</p>
+</div>
+<div class="identity"><span class="avatar" aria-hidden="true">经</span><label>经办人<input id="actor" value="本机经办员" aria-label="经办人"></label><label>角色<select id="role" aria-label="角色"><option value="reviewer">审核员</option><option value="viewer">只读观察员</option><option value="admin">合同管理员</option></select></label>
+</div>
+</header>
+<div class="notice system-notice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg>
+<div><b>核对后再登记</b><span>系统提取结果仅供参考，租金由规则程序核算。当前角色选择不等于正式账号权限。</span>
+</div><span class="notice-label">业务提示</span>
+</div>
+<div id="connection-status" class="error" role="status" hidden>
+</div>
+<p id="demo-global-space" class="notice" role="status" hidden></p>
+<p id="role-hint" class="notice" hidden>当前为只读观察员，可查看原件和台账；上传、修改、确认与发文操作不可用。</p>
+<div id="toast" role="status" aria-live="polite">
+</div>
+<div id="governance-subnav" class="actions"><button data-sub="inbox">合同管理</button><button data-sub="inbox" data-document-filter="held">合同待补录</button><button data-sub="governance">待核验与问题清单</button><button data-sub="review">合同确认</button></div><section id="inbox" class="tab">
+<section id="demo-tools" class="card" aria-labelledby="demo-heading">
+<div class="section-head"><div><h2 id="demo-heading">测试演示</h2><p id="demo-space-label">正式业务空间 · 测试将使用独立数据空间</p></div><button id="demo-formal" hidden>返回正式业务空间</button></div>
+<label for="demo-mode">运行模式</label><select id="demo-mode"><option value="replay">缓存回放（演示，历史OCR＋当前规则）</option><option value="live">实时云识别（使用当前已授权配置）</option></select>
+<p class="muted">默认不调用模型。缓存须与图片及声明模型条件匹配；缺失时报告失败，不自动转付费。实时模式会调用已配置模型。识别完成后生成报告，未决合同不自动发布。</p>
+<div class="actions"><button id="demo-practice">一键测试练习题</button><button id="demo-evaluation">一键测试评测题</button><button id="demo-reset" class="danger">一键重置数据</button></div>
+<div id="demo-progress" role="status" aria-live="polite">正在读取测试状态…</div>
+<div id="demo-report"></div><details><summary>测试历史与恢复</summary><div id="demo-history"></div></details>
+</section>
+<div id="stats" class="stats">
+</div>
+<div class="card queue-card">
+<div class="section-head">
+<div class="section-title">
+<h2>材料列表</h2><span id="document-count" class="count-badge">0 份文书</span>
+</div>
+<div class="list-actions"><button id="all-documents" aria-pressed="true">全部材料</button><button id="refresh"><span aria-hidden="true">↻</span> 刷新列表</button>
+</div>
+</div>
+<div class="queue-toolbar"><label>搜索材料<input id="document-search" type="search" placeholder="档案名称或编号" autocomplete="off"></label><label>状态<select id="document-status"><option value="">全部材料</option><option value="needs_human">待核对</option><option value="pending_confirmation">待确认</option><option value="processing">处理中</option><option value="held">待补件</option><option value="published">已登记</option><option value="withdrawn">已撤回</option></select></label><label>排序<select id="document-sort"><option value="updated">最近更新</option><option value="oldest">最早更新</option><option value="name">档案名称</option></select></label>
+</div>
+<p id="filter-description" class="muted" aria-live="polite">全部材料</p>
+<div id="approval-dashboard" class="card"></div><div id="withdrawal-queue" data-admin></div><div id="documents" class="table-scroll" tabindex="0" role="region" aria-label="材料处理队列">
+<div class="skeleton" role="status">正在读取材料…</div>
+</div>
+<div id="document-pagination" class="pagination"><span id="page-info" aria-live="polite"></span><button id="page-prev">上一页</button><button id="page-next">下一页</button>
+</div>
+</div>
+<details id="intake" class="card"><summary>上传材料与批量上传</summary>
+<div class="grid2 intake-grid">
+<div class="card import-card">
+<div class="section-head">
+<div class="section-title"><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 14v7h16v-7"/></svg></span>
+<h2>上传材料</h2>
+</div><span class="tag">自动识别，人工核对</span>
+</div>
+<p>同一份合同支持组合上传，保留原件及对应证据位置。</p>
+<form id="upload"><label for="name">档案名称 <span class="required">*</span></label><input id="name" required placeholder="请输入档案名称，例如：补档-2026-01"><label class="drop" for="files"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H5V3h2Zm7 0v6h5M12 18v-6m-3 3 3-3 3 3"/></svg></span><b>选择需要归档的文书材料</b><span>图片、PDF、Word、Excel · 支持多文件组合</span><input type="file" id="files" multiple accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx,.doc,.xls,.docm,.xlsm" required><span id="file-summary" class="file-summary" aria-live="polite">尚未选择文件</span></label>
+<div class="import-footer"><span>旧 DOC / XLS 仅存证，不解析</span><button class="primary">上传并处理</button>
+</div>
+</form>
+</div>
+<div class="card batch-card">
+<div class="section-head">
+<div>
+<h2>批量上传</h2>
+<p>按文书批量归档，跟踪整包处理进度。</p>
+</div><span class="tag neutral">ZIP 批量导入</span>
+</div>
+<form id="batch-upload"><input id="batch-file" type="file" accept=".zip" required aria-label="补档ZIP"><button>上传 ZIP 文件</button>
+</form>
+<p class="batch-note">每个子文件夹为一份文书，或使用 LX-017_1.jpg 页码命名。计时包含识别与人工发布；有失败或挂起不计为全部通过。</p>
+<div id="batches">
+</div>
+</div>
+</div>
+</details>
+<details class="card usage-guide"><summary>使用示例与说明</summary>
+<div class="workflow">
+<div class="workflow-label"><b>业务办理流程</b><span>全过程证据留痕</span>
+</div><ol><li><span>01</span>
+<div><b>材料归档</b><small>保存原件 / 提取信息</small>
+</div></li><li><span>02</span>
+<div><b>证据核验</b><small>对照原件 / 填写信息</small>
+</div></li><li><span>03</span>
+<div><b>租金核算</b><small>资料匹配 / 差异复核</small>
+</div></li><li><span>04</span>
+<div><b>登记台账</b><small>人工确认 / 历史可溯</small>
+</div></li></ol>
+</div>
+<div class="card sample-card">
+<div class="section-head">
+<div class="section-title"><span class="section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3h14v18H5zM8 7h8m-8 4h8m-8 4h4"/></svg></span>
+<h2>典型问题样例</h2>
+</div><span class="tag neutral">开发样张</span>
+</div>
+<p>选择典型文书，查看证据核验与异常处理流程。</p>
+<div class="examples"><button data-sample="LX-017"><span class="sample-id">LX-017 <span aria-hidden="true">↗</span></span><b>面积涂改</b><span>无签章修改</span></button><button data-sample="LX-018"><span class="sample-id">LX-018 <span aria-hidden="true">↗</span></span><b>未勾选计租方式</b><span>拍照 / 折角</span></button><button data-sample="LX-001"><span class="sample-id">LX-001 <span aria-hidden="true">↗</span></span><b>模糊与金额涂改</b><span>历史合同</span></button><button data-sample="LX-034"><span class="sample-id">LX-034 <span aria-hidden="true">↗</span></span><b>金额大小写不同</b><span>租金核算</span></button>
+</div>
+<div class="sample-note">样张已用于开发，不作为盲测结果；不读取标准答案。</div>
+</div>
+</details>
+</section>
+<section id="governance" class="tab hidden">
+<div class="section-head">
+<div>
+<h2>待办事项</h2>
+<p>集中处理识别失败、资料缺失和待确认事项。系统提取结果仅供参考，请对照原件核实。</p>
+</div><button id="refresh-governance">刷新待办</button>
+</div>
+<div id="governance-counts" class="quality-stages" role="status">
+</div>
+<div class="card" id="manual-route">
+<h2>必须逐项复核</h2><label>问题类别<select id="governance-filter"><option value="">全部待办</option><option>识别问题</option><option>原件问题</option><option>业务冲突</option><option>未完成</option><option>待确认</option></select></label>
+<div id="governance-list">
+</div>
+</div>
+<div class="card" id="batch-route">
+<div class="section-head">
+<h2>可核对后批量确认</h2><button id="batch-refresh">重新分流</button>
+</div>
+<p>候选一致且证据完整的材料，仍须逐份核对原件、完整性与核算后批量确认；含弱匹配或疑点的材料进入逐项人工复核。</p>
+<div id="batch-list">
+</div>
+<div class="confirmation-panel"><label class="check"><input id="batch-reviewed" type="checkbox">我已逐份核对本批全部采纳值的原件证据、资料完整性、缴费归集和逐年核算</label><button id="batch-confirm" class="primary" disabled>批量确认</button>
+</div>
+<div id="batch-results" aria-live="polite">
+</div>
+</div>
+</section>
+<section id="review" class="tab hidden">
+<div id="generated-contracts-review"></div>
+<div id="empty-review" class="empty"><b>选择一份材料开始核对</b><small>识别失败时，也可以对照原件手动填写。</small><button id="go-pending" class="primary">前往待办事项</button>
+</div>
+<div id="review-content" class="hidden">
+<div class="review-top">
+<div>
+<h2 id="doc-name">
+</h2>
+<div id="doc-meta">
+</div>
+</div>
+<div><button id="reload-doc">重新加载材料</button><button id="retry">恢复未完成识别</button><button id="retry-unknown" hidden>重发结果未知的请求</button><button id="resume-review" hidden>继续人工核验</button>
+</div>
+</div>
+<p id="document-update" class="notice" hidden>材料处理进度已更新。当前输入保持不变，可点击“重新加载材料”查看最新结果。</p>
+<div id="governance-status" class="notice">
+</div>
+<div id="confidence-summary" aria-live="polite"></div>
+<div class="document-tools">
+<details id="attachments" class="card"><summary>资料清单与补充材料（原件不覆盖）</summary>
+<div id="inventory">
+</div><details><summary>原件与识别记录</summary><div id="risks"></div></details>
+<p>补件保留原件，但会使旧草稿、确认和核算预览失效，需要重新核对。</p>
+<form id="attach-form"><input id="attach-files" type="file" multiple accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx,.doc,.xls,.docm,.xlsm" aria-label="补充材料"><button>上传补充材料</button>
+</form>
+</details>
+<details class="secondary-actions"><summary>修正文书分组</summary>
+<form id="merge-form"><label>本文书其实是另一份文书的某几页（补档命名/分组不整齐时）<select id="merge-target" aria-label="并入目标"></select></label><button>并入所选文书</button>
+</form>
+</details>
+</div>
+<div class="review-navigation">
+<div class="review-status" role="status"><span id="draft-state"></span><span id="preview-state"></span>
+</div>
+<div class="review-toolbar"><div class="review-links" role="group" aria-label="复核定位"><button data-jump="review-stage-0">核对合同事实</button><button data-jump="review-stage-2">匹配与核算</button><button data-jump="review-stage-3">确认登记</button></div><div class="actions contract-navigation"><button id="review-prev">上一份合同</button><button id="review-next">下一份合同</button><button id="review-back">合同管理</button></div>
+</div>
+<details><summary id="remaining-count">登记前待办</summary>
+<div id="remaining-items">
+</div>
+</details>
+</div>
+<div class="review-grid">
+<div class="image-panel">
+<div class="evidence-heading">
+<h2>原件证据</h2>
+<p id="evidence-live" role="status" aria-live="polite">选择字段，定位其原文依据。</p>
+</div>
+<div class="toolbar"><select id="page-select" aria-label="原件页"></select><button id="rotate">旋转90°</button><button id="previous">调整页序：向前移动</button><a id="download-original" class="button">下载原件</a>
+</div>
+<details id="page-transcription"><summary>本页文字转写</summary>
+<p>保留首遍OCR及模型文字复核稿，改动逐项展示。具体输入来源见版本说明；两遍一致不直接代表识别正确，原文不覆盖。</p>
+<a id="download-transcription" class="button">下载逐页文字 TXT</a>
+<div id="transcription-versions" aria-live="polite"></div>
+</details>
+<div class="image-scroll" tabindex="0" role="region" aria-label="原件证据，可滚动查看">
+<div id="native-evidence" class="hidden">
+</div>
+<div id="image-wrap"><img id="original" alt="合同原件"><svg id="overlay" aria-label="字段证据区域"></svg>
+</div>
+</div>
+<p class="caption">原件优先。原生文档使用实际段落/单元格位置，不伪造页码；页面调整会使旧证据确认失效。</p>
+</div>
+<div class="field-panel">
+<div class="section-head">
+<h2>核对并填写材料信息</h2><span class="tag amber">逐项复核</span>
+</div>
+<section id="alteration-assistance" class="alteration-assistance" aria-labelledby="alteration-title" hidden>
+<h3 id="alteration-title">涂改与签章核验</h3>
+<p>先核对涂改前后原文，再判断涂改处是否有手印或盖章。</p>
+<div id="alteration-candidates" class="alteration-candidates"></div>
+<p id="seal-region-note" class="caption"></p>
+<fieldset class="seal-decision"><legend>真人核验结论</legend>
+<label><input type="radio" name="seal-decision" value="present">有签章</label>
+<label><input type="radio" name="seal-decision" value="absent">无签章</label>
+<label><input type="radio" name="seal-decision" value="unknown">无法判断</label>
+</fieldset>
+<label for="alteration-source">判断依据所在原件<select id="alteration-source"><option value="">请选择原件</option></select></label>
+<p id="seal-decision-hint" class="caption" role="status">尚未作出真人核验结论。</p>
+<p id="alteration-impact-note" class="caption"></p>
+</section>
+<details class="review-stage" open><summary><h3 class="review-section" id="review-stage-0" tabindex="-1">核对合同事实</h3></summary><label class="check"><input id="show-suggestions" type="checkbox">查看系统提取结果（仅供参考）</label><label hidden>将原文关联到<select id="evidence-field" aria-label="引用目标字段"></select></label>
+<p class="caption"><span class="required-mark">*</span> 为必填项，填全并核对后才能登记。宗地图由系统检测预填，可人工修正。</p><div id="review-issues"><div id="quality-resolutions"></div></div><div id="fields">
+</div><datalist id="uses"><option>住宅</option><option>商服</option><option>工业</option><option>仓储</option></datalist><datalist id="grades"><option>一级</option><option>二级</option><option>三级</option><option>四级</option></datalist><datalist id="modes"><option>固定</option><option>随标准调整</option><option>未勾选</option></datalist>
+<details class="context-box"><summary>哪些信息需要核实</summary>
+<p>上下文模型的建议必须给出原文证据和可核对说明；不能代替看不清的金额、面积、主体和日期。未配置的模型明确跳过，无法核实须补充清晰材料。</p>
+</details>
+<label>核对说明 <span class="required-mark" aria-hidden="true">*</span><textarea required id="reason" placeholder="说明查看了哪一页、如何排除歧义。不能用“金额合算”替代原文事实。"></textarea></label><label>暂算或待主管部门确认事项<textarea id="uncertainty" placeholder="若资料存在业务多解，写明各方案、差额与需要的材料；无法辨认原文请直接挂起。"></textarea></label><label>有解除/收回证据的停止计租日（可空）<input id="stop-date" type="date"></label>
+<button id="save-draft">保存草稿</button>
+</details>
+<details class="review-stage" open><summary><h3 class="review-section" id="review-stage-2" tabindex="-1">匹配与核算</h3></summary><p class="caption">匹配顺序：证件号码 → 宗地号与承租人 → 住所／坐落。多宗地或信息冲突须人工确认。</p><button id="preview" class="primary">核对登记、缴费与减免，预览租金</button>
+<div id="approval-actions" class="card"><button id="submit-approval">提交合同管理员审批</button><button id="return-approval">退回审核员</button><button id="check-approval">一键核查</button><div id="approval-check-result"></div><p id="approval-state" role="status"></p></div><div id="matching">
+</div>
+<section class="context-box" aria-labelledby="obligation-heading">
+<h4 id="obligation-heading">本期应缴试算（只读）</h4>
+<p>只核对本合同期间的计算假设，不代表确认合同有效或完成登记。付款归属未核实的，实缴和欠缴保持未知；试算不进入正式台账、通知或导出。</p>
+<label class="check"><input id="obligation-evidence-clear" type="checkbox">已对照原件核对本次公式所用的租期、计租方式及金额／面积、用途、级别，并关联依据。</label>
+<label class="check"><input id="obligation-reliefs-clear" type="checkbox">已核对本期适用减免；无需减免的也已核实。</label>
+<label for="obligation-termination-month">原件仅载明收回月份（可空，不补具体日）<input id="obligation-termination-month" type="month"></label>
+<label for="obligation-termination-source">收回月份的原件依据<select id="obligation-termination-source"><option value="">请选择原件</option></select></label>
+<button id="obligation-preview" type="button" aria-describedby="obligation-state" disabled>仅试算本期应缴</button>
+<p id="obligation-state" role="status" aria-live="polite">尚未试算；请先核对上方两项。</p>
+<div id="obligation-result" aria-live="polite"></div>
+</section>
+<p id="calculation-status" class="notice" role="status" hidden>材料或缴费选择已修改，以下为上次预览。请重新预览租金后再登记。</p>
+<div id="calculation">
+</div>
+</details>
+<div class="confirmation-panel">
+<h3 class="review-section" id="review-stage-3" tabindex="-1">确认登记</h3><label class="check"><input id="registration-clear" type="checkbox">我已对照原件核对合同信息、资料完整性、缴费减免归属及租金核算结果，确认无误并登记。</label>
+<input id="material-clear" type="checkbox" hidden><input id="evidence-clear" type="checkbox" hidden><input id="payments-clear" type="checkbox" hidden><input id="calculation-clear" type="checkbox" hidden>
+<div id="confirm-requirements" class="requirements" aria-live="polite">
+</div>
+<div class="actions"><button aria-describedby="confirm-requirements" id="confirm" class="primary" disabled>确认并登记台账</button><button id="hold" class="warning">转为待补件</button>
+</div>
+</div>
+<section class="secondary-actions" aria-label="撤回登记">
+<h3>撤回登记</h3><label for="withdraw-reason">原因说明</label><textarea id="withdraw-reason" maxlength="2000" placeholder="说明撤回原因，提交管理员审核"></textarea>
+<p>审核通过前，合同登记与台账保持有效；通过后撤回并重新核算，原件及历史保留。</p>
+<button id="withdraw" class="danger">撤回登记 · 提交审核</button><div id="withdraw-review" aria-live="polite"></div>
+</section>
+<details><summary>修改与处理记录</summary><pre id="audit"></pre>
+</details>
+</div>
+</div>
+</div>
+</section>
+<section id="ledger" class="tab hidden"><h2>一宗一档电子台账</h2><a href="/api/export" class="button">导出业务 CSV（ZIP）</a><form id="ledger-filter" class="card filters"><label>街路<input id="f-street" placeholder="如 繁荣路"></label><label>合同状态<select id="f-status"><option value="">全部</option><option>有效</option><option>到期未续</option><option>已解除/收回</option></select></label><label>欠缴<select id="f-arrears"><option value="">全部</option><option>欠缴</option><option>未欠缴</option></select></label><label>关键字<input id="f-keyword" placeholder="姓名/坐落/单元号"></label><button>查询</button>
+</form>
+<div id="ledger-pagination" class="pagination"></div><div id="ledger-content"></div></section>
+<section id="rent" class="tab hidden"><h2>核算查询与历史重算</h2><p>金额截至核算基准日；费率、分段、减免与暂算均有依据，人工确认后生效。</p><div id="rent-content"></div><div class="card" data-admin>
+<h2>计租标准</h2>
+<p>仅管理员可发布。费率表变更先查看逐宗差异，历史通知保持原版本。</p><button id="read-rules">读取当前费率</button>
+<div id="rates-form"></div><details><summary>费率 JSON（高级）</summary><textarea id="rates-json" rows="8" aria-label="计租费率JSON" placeholder="读取后编辑费率；必须提供正式来源依据"></textarea>
+</details><label>规则变更依据<input id="rule-reason"></label><button id="preview-rules">预览全部宗地差异</button><label class="check"><input id="rule-calculation-clear" type="checkbox">我已按本次新规则复核逐宗差异；不沿用旧核算确认</label><button id="confirm-rules" disabled>确认规则并发布重算</button><pre id="rule-impact"></pre>
+</div>
+</section>
+<section id="reminders" class="tab hidden"><h2>到期与欠缴提醒</h2><form id="reminder-filter" class="card filters"><label>查看日期<input id="reminder-date" type="date"></label><label>范围起始日<input id="reminder-start" type="date"></label><label>范围结束日<input id="reminder-end" type="date"></label><label>事项<select id="reminder-kind"><option value="">全部</option><option>合同到期</option><option>欠缴</option></select></label><label>级别<select id="reminder-level"><option value="">全部</option><option>红</option><option>橙</option><option>黄</option></select></label><button>查询</button></form><p class="notice">到期分级：红色＝已过期至少 1 天；橙色＝0–30 天内到期；黄色＝31–90 天内到期。天数相对查看日期计算。<br>欠缴分级：红色＝欠缴 ≥3 个年度；橙色＝欠缴 1–2 个年度，按年度数判断，不折算为天数。日期范围按合同到期日或最早欠缴年度的 6 月 30 日筛选；留空不限制。</p><p id="reminder-date-note"></p><a id="reminder-export" class="button">导出日历 .ics</a><div id="reminder-calendar" class="card"></div><div id="reminder-list" class="card table-scroll"></div></section>
+<section id="notices" class="tab hidden"><div id="notice-template-panel" class="card template-panel"></div><h2>待催缴对象</h2><p>缴清结果以确认的缴费记录为准。模拟通道不会发送真实短信。</p><div id="notice-candidates"></div><div id="notice-preview"></div><h2>审核与发送跟踪</h2><div id="notice-list" class="table-scroll"></div></section>
+<section id="contracts" class="tab hidden"><h2>合同生成和协议变更</h2><div id="contract-template-panel" class="card template-panel"></div><button id="new-contract" class="primary">起草新签合同</button><p>草稿不入账；签订、变更材料上传核验后生效。终止须提供依据并预览影响。</p><div id="contract-candidates"></div><div id="contract-list"></div></section>
+<section id="tax" class="tab hidden"><div class="card">
+<div class="section-head">
+<h2>税务推送单（文件交换，留存每期）</h2><span><input id="tax-year" type="number" value="2026" min="1998" max="2026" aria-label="年度"><select id="tax-quarter" aria-label="季度"><option value="1">第一季度</option><option value="2">第二季度</option><option value="3" selected>第三季度</option><option value="4">第四季度</option></select><button id="tax-push">生成并留存</button></span>
+</div>
+<div id="tax-list">
+</div>
+</div>
+</section>
+<section id="statistics" class="tab hidden"><h2>统计查询</h2><form id="statistics-filter" class="card filters"><label>区域 / 街路<input id="s-street"></label><label>合同状态<select id="s-status"><option value="">全部</option><option>有效</option><option>到期未续</option><option>已解除/收回</option></select></label><label>欠缴<select id="s-arrears"><option value="">全部</option><option>欠缴</option><option>未欠缴</option></select></label><label>关键字<input id="s-keyword"></label><button>查询</button></form><a id="statistics-export" class="button">导出统计 CSV</a><div id="stats-panel" class="stats"></div><div id="statistics-detail"></div></section>
+<section id="measure" class="tab hidden">
+<div id="system-summary" class="quality-stages" role="status">
+</div>
+<div class="card">
+<h2>识别状态</h2>
+<p>这里展示实际模型/时间/失败记录，不将缓存或人工录入视作实时识别。当前尚未完成全量准确率、整包20分钟和真实人工耗时测量。</p>
+<p id="model-summary">
+</p>
+<details><summary>模型配置与技术记录</summary>
+<div id="model-status">
+</div>
+</details>
+</div>
+<div class="card" data-admin>
+<h2>识别模型与工作流</h2>
+<p>默认方案3：先逐页OCR识别全文，再由27B同时对照原图与OCR全文，复核文字、推理并提取字段。存疑及涂改效力仍须人工确认。</p>
+<form id="recognition-workflow-form">
+<div class="filters"><label>主模型<select id="workflow-primary"><option value="qwen3.5-27b">方案1：27B直接读图与推理</option><option value="qwen-vl-ocr-2025-11-20">方案2：OCR识别 → 27B纯文本推理</option><option value="plan3">方案3：OCR识别 → 27B原图＋全文复核（默认）</option><option value="plan3-qwen3.7-plus">高端方案：OCR → Qwen3.7-Plus原图＋全文复核</option><option value="plan3-qwen3-vl-plus">高端方案：OCR → Qwen3-VL-Plus原图＋全文复核</option></select></label></div>
+<label><input type="checkbox" id="workflow-enabled">启用识别（仅限已授权材料）</label>
+<p>切换后对下一次开始的任务生效；已运行任务沿用原配置，历史结果不会自动重算。</p>
+<button type="submit">保存工作流</button>
+<p id="workflow-message" role="status" aria-live="polite">正在加载当前工作流…</p>
+</form>
+<h3>其他模型与本地部署</h3>
+<p>选择阿里云提供、可本地部署的视觉推理模型。能力档位用于选型，合同准确率需另行实测。</p>
+<button id="load-model-settings" type="button">加载当前配置</button>
+<form id="model-settings-form" hidden>
+<div class="filters">
+<label>模型<select id="reasoning-model"></select></label>
+<label>部署方式<select id="model-deployment"><option value="local">本地 / 政务内网</option><option value="aliyun">阿里云 API（限已授权材料）</option></select></label>
+<label id="model-endpoint-label">本地服务地址<input id="model-endpoint" placeholder="http://127.0.0.1:8000/v1"></label>
+</div>
+<p id="model-choice-detail"></p>
+<label><input type="checkbox" id="model-enabled">启用所选模型处理后续识别任务</label>
+<p>保存后供下一次开始的识别任务使用；已运行任务保留原配置。所选模型使用单路径，关闭原有后备模型，结果仍须人工核验。此操作不下载或部署权重。</p>
+<button type="submit">保存模型选择</button> <button id="reset-model-settings" type="button">恢复部署文件配置</button>
+</form>
+<p id="model-settings-message" role="status" aria-live="polite"></p>
+</div>
+<div class="card" data-admin>
+<h2>数据备份</h2><button id="backup">备份数据库与原件（管理员）</button><pre id="backup-result"></pre>
+</div>
+<p id="admin-hint" class="muted">计租标准调整与数据备份仅向管理员展示。</p>
+<details class="card"><summary>任务日志</summary>
+<div id="jobs" class="table-scroll">
+</div>
+</details>
+</section>
+</div>
+<footer class="main-footer"><span>国有土地租赁智能管理平台</span><span>原件留存 · 人工核对 · 租金核算</span>
+</footer>
+</main>
+<dialog id="unsaved-dialog" aria-labelledby="unsaved-title">
+<h2 id="unsaved-title">是否保存本次合同修改？</h2>
+<p>保存为草稿后可继续处理，不会登记到台账。</p>
+<p id="unsaved-error" class="error" role="alert" hidden>
+</p>
+<div class="actions"><button id="unsaved-save" class="primary">保存后继续</button><button id="unsaved-discard">不保存，继续</button><button id="unsaved-cancel" autofocus>取消</button>
+</div>
+</dialog>
+<dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-description">
+<form id="action-form">
+<h2 id="action-title">
+</h2>
+<p id="action-description">
+</p>
+<div id="action-fields">
+</div>
+<p id="action-error" class="error" role="alert" hidden>
+</p>
+<div class="actions"><button id="action-cancel" type="button">取消</button><button id="action-submit" type="submit" class="primary">确认</button>
+</div>
+</form>
+</dialog>
+<script src="/static/controls.js?v=20261028-business8">
+</script>
+<script src="/static/business.js?v=20261029-workbench-persistent"></script>
+<script src="/static/model-settings.js?v=20261029-highend-models"></script>
+<script src="/static/app.js?v=20261029-highend-models">
+</script><script src="/static/demo-tests.js?v=20261029-isolated-demo"></script><datalist id="doc-types"><option>新签</option><option>续期</option><option>变更</option></datalist><datalist id="yes-no"><option>是</option><option>否</option></datalist></body></html>
+

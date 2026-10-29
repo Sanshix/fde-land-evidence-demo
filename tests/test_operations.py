@@ -244,3 +244,32 @@ def test_restore_does_not_require_original_alias_to_exist(client, tmp_path):
     page = json.loads(restored.execute("SELECT pages FROM documents").fetchone()[0])[0]
     assert Path(page["source"]).is_file() and Path(page["source"]).is_relative_to(target)
     restored.close()
+
+
+def test_export_preserves_agent_provenance_and_excludes_unpublished_trial(client):
+    import csv
+    import io
+    import zipfile
+
+    doc, _ = new_doc(client)
+    b = preview(client, doc, reviewed(doc))
+    assert client.post(f"/api/documents/{doc['id']}/confirm", json=b, headers=HEAD).status_code == 200
+    # Existing isolated test-agent records must not become human reviews on export.
+    with store.connection() as db:
+        review = json.loads(db.execute("SELECT review FROM documents WHERE id=?", (doc['id'],)).fetchone()[0])
+        review['method'] = '测试代理模拟核验'
+        db.execute("UPDATE documents SET review=? WHERE id=?", (json.dumps(review), doc['id']))
+    from PIL import Image
+    raw = io.BytesIO()
+    Image.new('RGB', (100, 100), 'blue').save(raw, format='PNG')
+    imported = client.post('/api/import', files={'files': ('pending.png', raw.getvalue(), 'image/png')},
+                           data={'name': 'SYNTHETIC-PENDING-TRIAL'}, headers=HEAD).json()
+    pending = client.get('/api/documents/' + imported['id']).json()
+    assert pending['id'] != doc['id'] and pending['state'] != 'published'
+    body = reviewed(pending) | {'obligation_evidence_clear': True, 'obligation_reliefs_reviewed': True}
+    assert client.post(f"/api/documents/{pending['id']}/obligation-preview", json=body, headers=HEAD).status_code == 200
+    archive = zipfile.ZipFile(io.BytesIO(client.get('/api/export').content))
+    for name in ['合同要素.csv', '宗地台账.csv']:
+        rows = list(csv.DictReader(io.StringIO(archive.read(name).decode('utf-8-sig'))))
+        assert len(rows) == 1 and rows[0]['处理方式'] == '测试代理模拟核验'
+    assert '不含只读应缴试算' in archive.read('说明.txt').decode()

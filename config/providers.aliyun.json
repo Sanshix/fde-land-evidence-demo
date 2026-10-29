@@ -1,6 +1,6 @@
 {
   "enabled": false,
-  "reason": "真实鉴权及单张模拟样张OCR已成功；识别准确率未验收；按需启用且仅允许已授权样张",
+  "reason": "方案3：OCR全文 → 27B结合原图与全文复核、推理及结构化输出",
   "authorized_scope": "explicit_sample_hash",
   "authorized_sha256": [
     "66c348ee37af7c012d57822dd2d185ea97af984fb57a0e3f5ea945df851738a6"
@@ -8,17 +8,36 @@
   "models": {
     "primary": {
       "provider": "aliyun",
-      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-      "model_id": "qwen-vl-ocr-2025-11-20",
-      "response_format": "ocr_text",
+      "base_url": "https://ws-gii3yuqz050k1sww.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       "api_key_env": "AI_ALIYUN_KEY",
-      "open_weights": false,
       "authorized": true,
       "identity_verified": false,
       "weight_revision": null,
-      "protocol_status": "live_ocr_response_received_not_accuracy_pass",
-      "region": "Singapore",
-      "latest_live_test": "runs/cloud-live-20261028T073841Z-aliyun/aliyun-qwen-vl-ocr-2025-11-20.json"
+      "model_id": "qwen-vl-ocr-2025-11-20",
+      "response_format": "ocr_text",
+      "open_weights": false
+    },
+    "secondary": {
+      "provider": "aliyun",
+      "base_url": "https://ws-gii3yuqz050k1sww.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "AI_ALIYUN_KEY",
+      "authorized": true,
+      "identity_verified": false,
+      "weight_revision": null,
+      "model_id": "qwen3.5-27b",
+      "open_weights": true,
+      "catalog_id": "qwen3.5-27b",
+      "full_transcription": true,
+      "stream": true,
+      "enable_thinking": true,
+      "thinking_budget": 1024,
+      "max_tokens": 12000,
+      "license": "Apache-2.0",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen3.5-27B",
+      "save_text_revision": true,
+      "include_original_images": true
     }
-  }
+  },
+  "workflow": "ocr_then_qwen_image_text",
+  "document_context": false
 }

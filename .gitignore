@@ -17,4 +17,8 @@ wheelhouse/
 Thumbs.db
 *.py[cod]
 config/notice.json
+config/workbench.env
 *-backups/
+
+# Native portable build outputs
+portable-build/

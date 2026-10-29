@@ -61,16 +61,32 @@ PATTERNS = [
 LINE_KEYS = {"lessor", "tenant", "identity", "residence", "phone", "grade", "signed", "original_contract_no"}
 
 
+def document_type_observation(lines):
+    """Classify only a visible title or an explicit statement about this contract."""
+    titles = {"国有建设用地使用权租赁合同", "国有土地租赁合同", "国有土地使用权租赁合同", "土地租赁合同", "租赁合同"}
+    normalized = [(clean(raw), raw) for raw in lines]
+    for text, raw in normalized:
+        if text == "变更协议" or any(text == title + "变更协议" for title in titles):
+            return "变更", raw
+    for text, raw in normalized:
+        if (text in {"续期合同", "续签合同", "租赁续期合同", "续签协议"}
+                or re.match(r"^本合同(?:为|系).*(?:续签|续期)", text)
+                and not re.search(r"如需|另行|拟|可以|届时", text)):
+            return "续期", raw
+    for text, raw in normalized:
+        if text in titles:
+            return "新签", raw
+    return None, None
+
+
 def prose_candidates(lines, page_id, model, provider, kind="ocr"):
     """lines: [{'text', optional 'box'[x1,y1,x2,y2], optional 'score', 'locator'}]."""
     out = {k: [] for k in FIELDS}
     text = "".join(clean(line["text"]) for line in lines)
 
     def where(snippet):
-        for line in lines:
-            if snippet and snippet[:6] in clean(line["text"]):
-                return line
-        return {}  # Cross-line text without a mapped region must not borrow the first line's box.
+        matches = [line for line in lines if snippet and clean(snippet) in clean(line["text"])]
+        return matches[0] if len(matches) == 1 else {}  # Cross-line text without a mapped region must not borrow the first line's box.
 
     def add(key, value, raw, reason="条款句式抽取"):
         value = str(value).strip("：:;,，；。（）()")
@@ -86,7 +102,7 @@ def prose_candidates(lines, page_id, model, provider, kind="ocr"):
                 "source_page_id": page_id,
                 "bbox": line.get("box"),
                 "response_locator": line.get("locator"),
-                "score": line.get("score", 0),
+                "score": line.get("score"),
                 "score_meaning": "ocr_line_score" if "score" in line else "not_provided",
                 "kind": kind,
                 "reason": reason + "；须对照原件核验",
@@ -129,12 +145,19 @@ def prose_candidates(lines, page_id, model, provider, kind="ocr"):
                           (r"[☑✓√■]随(?:基准地价|计租标准|标准)调整", "随标准调整")):
         for match in re.finditer(pattern, text):
             add("mode", mode, match.group(), "检测到勾选字符，仍须核对原图")
-    if "变更协议" in text:
-        add("doc_type", "变更", "变更协议")
-    elif "续签" in text or "续期" in text:
-        add("doc_type", "续期", "续签/续期")
-    elif "租赁合同" in text:
-        add("doc_type", "新签", "租赁合同（未见续签字样）", "未见续签/变更字样，按新签提示")
+    for source_line in lines:
+        for sentence in re.split(r'[。；;\n]', clean(source_line['text'])):
+            sentence = sentence.strip()
+            ordinal = r'(?:第[一二三四五六七八九十0-9]+条)?'
+            fixed = ordinal + r'(?:本)?合同期内年租金(?:标准)?(?:不作调整|不做调整|保持不变|固定不变|不予调整)'
+            floating = ordinal + r'年租金标准随(?:[县市区]人民政府公布的)?基准地价调整而相应调整(?:[,，]乙方按调整后的标准缴纳)?'
+            if re.fullmatch(fixed, sentence):
+                add('mode', '固定', sentence, '完整当前合同计租条款')
+            elif re.fullmatch(floating, sentence):
+                add('mode', '随标准调整', sentence, '完整当前合同计租条款')
+    doc_type, type_source = document_type_observation([line["text"] for line in lines])
+    if doc_type:
+        add("doc_type", doc_type, type_source, "可见标题或本合同当前续签说明；须核对整份文书")
     if re.search(r"宗\s*地\s*图", text) and len(text) < 400:
         add("has_map", "是", "宗地图", "本页为宗地图页")
     originals = {c["value"] for c in out["original_contract_no"]}

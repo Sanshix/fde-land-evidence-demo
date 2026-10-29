@@ -12,7 +12,8 @@ from pathlib import Path
 
 from PIL import Image, ImageFilter, ImageStat
 
-from .domain import FIELDS, clean
+from .domain import DOCUMENT_ATTRIBUTES, FIELDS, clean
+from .evidence import critical_fields, normalized_candidates, observed, reported_score, valid_anchor
 
 ROOT = Path(__file__).resolve().parents[1]
 PARSER_VERSION = "spatial-fields-v1"
@@ -130,8 +131,9 @@ def extract(lines, page_id, model):
 
 
 def assess(candidates, qualities=()):
+    candidates = normalized_candidates(candidates)
     risks = []
-    for key in CRITICAL:
+    for key in critical_fields(candidates):
         values = {c["value"] for c in candidates.get(key, [])}
         if not values:
             risks.append({"field": key, "code": "missing", "reason": f"{FIELDS[key]}缺少可引用候选"})
@@ -139,12 +141,17 @@ def assess(candidates, qualities=()):
             risks.append(
                 {"field": key, "code": "disagreement", "reason": f"{FIELDS[key]}存在跨模型/跨页/原文多值"}
             )
-        if any(c.get("score", 0) < 0.9 for c in candidates.get(key, [])):
+        rows = candidates.get(key, [])
+        if rows and not any(c.get("kind") == "native_extract" for c in rows) and len({c["model"] for c in rows if observed(c)}) < 2:
+            risks.append({"field": key, "code": "single_path", "reason": f"{FIELDS[key]}尚无独立路径佐证"})
+        if any(reported_score(c) is not None and reported_score(c) < 0.9 for c in candidates.get(key, [])):
             risks.append({"field": key, "code": "low_score", "reason": "识别分数偏低，不能据此判定正确"})
     for key, cs in candidates.items():
+        if cs and key not in DOCUMENT_ATTRIBUTES and not any(valid_anchor(c) for c in cs):
+            risks.append({"field": key, "code": "no_evidence", "reason": "缺少可采纳的原文区域"})
+        if cs and any(reported_score(c) is None for c in cs):
+            risks.append({"field": key, "code": "score_unknown", "reason": "识别路径未提供可用分数，不等于低分或已核实"})
         for c in cs:
-            if not (c.get("bbox") or c.get("source_locator")) or not c.get("raw_text"):
-                risks.append({"field": key, "code": "no_evidence", "reason": "缺少原文区域"})
             if key == "phone" and len(c["value"]) != 11:
                 risks.append({"field": key, "code": "invalid_format", "reason": "联系电话不是11位"})
     for key, cs in candidates.items():

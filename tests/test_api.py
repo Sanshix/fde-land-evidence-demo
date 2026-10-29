@@ -111,8 +111,7 @@ def test_publish_repeat_withdraw_reimport_consistency(client):
     assert duplicate["duplicate"]
     assert client.get("/api/ledger").json()[0]["digest"] == initial["digest"]
     current = client.get(f"/api/documents/{doc['id']}").json()
-    r = client.post(
-        f"/api/documents/{doc['id']}/withdraw",
+    r = approved_withdraw(client, doc['id'],
         json={"version": current["version"], "reason": "撤回测试"},
         headers=HEAD,
     )
@@ -153,8 +152,7 @@ def test_batch_contributions_and_immutable_notice(client):
         "/api/import", files={"files": ("again.png", raw, "image/png")}, data={"name": "again"}, headers=HEAD
     ).json()
     current = client.get(f"/api/documents/{doc['id']}").json()
-    r = client.post(
-        f"/api/documents/{doc['id']}/withdraw",
+    r = approved_withdraw(client, doc['id'],
         json={"version": current["version"], "reason": "仅撤第二批", "batch": duplicate["batch"]},
         headers=HEAD,
     )
@@ -177,3 +175,12 @@ def test_backup_and_source_fidelity(client):
     assert db.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
     db.close()
     assert list((folder / "objects").glob("*.png"))
+
+
+def approved_withdraw(client, identifier, json, headers=None):
+    application = client.post(f"/api/documents/{identifier}/withdraw-request", json=json, headers=HEAD)
+    assert application.status_code == 200, application.text
+    current = client.get(f"/api/documents/{identifier}").json()
+    pending = next(r for r in current["withdrawal_requests"] if r["status"] == "pending")
+    return client.post(f"/api/documents/{identifier}/withdraw", json=json | {"request_id": pending["id"], "decision": "approve"},
+                       headers={"X-FDE-Role": "admin", "X-FDE-Actor": "test-admin"})

@@ -23,6 +23,10 @@ UNSET = "待主管部门配置"
 
 
 def template(name):
+    from .templates import CATALOG, active_path
+    for kind, (filename, _) in CATALOG.items():
+        if name == filename:
+            return active_path(kind)
     return business.SAMPLES / "07_模板" / name
 
 
@@ -229,6 +233,11 @@ def tax_workbook(ledgers, docs, source, year, quarter):
             day = date.fromisoformat(str(r["缴费日期"])[:10])
             if str(r["序号"]) in chosen and start <= day < end:
                 paid[str(r["票据号"])] = r
+        for event in source.get("business_events", []):
+            if event["kind"] == "payment" and set(event["documents"]) & set(p["documents"]):
+                payment = event["payment"]
+                if start <= date.fromisoformat(payment["缴费日期"]) < end:
+                    paid[str(payment["票据号"])] = payment
         current = next((r for r in source["registry"] if r["不动产单元号"] == p["registry_unit"]), None)
         annual = next((r["due"] for r in p["annual"] if r["year"] == year), "0.00")
         deadline_in_period = start <= date(year, 6, 30) < end

@@ -1,5 +1,5 @@
 {
-  "status": "aliyun_singapore_and_baidu_ai_ocr_live_success; siliconflow_entry_retains_prior_evidence",
+  "status": "aliyun_beijing_workspace_live_success; other providers retain recorded evidence",
   "checked_at": "2026-10-28",
   "siliconflow": {
     "base_url": "https://api.siliconflow.cn/v1",
@@ -21,18 +21,18 @@
     "latest_live_test": "runs/cloud-live-20261028T051712Z/siliconflow-inventory.json; ConnectTimeout before model inventory; no OCR call"
   },
   "aliyun": {
-    "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "base_url": "https://ws-gii3yuqz050k1sww.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
     "proposed_models": [
       "qwen-vl-ocr-2025-11-20"
     ],
-    "region": "Singapore; same key Beijing 401, Singapore models and OCR 200",
+    "region": "Beijing",
     "credential_binding": "AI_ALIYUN_KEY; existing value unchanged",
     "open_weights": "not_claimed_for_commercial_OCR_model",
     "evidence": [
       "https://help.aliyun.com/zh/model-studio/qwen-vl-compatible-with-openai",
       "https://help.aliyun.com/zh/model-studio/qwen-vl-ocr-api-reference"
     ],
-    "latest_live_test": "runs/cloud-live-20261028T073841Z-aliyun/aliyun-qwen-vl-ocr-2025-11-20.json"
+    "latest_live_test": "runs/cloud-live-20261028T130249Z-aliyun/aliyun-qwen-vl-ocr-2025-11-20.json"
   },
   "baidu_qianfan": {
     "endpoint": "https://qianfan.baidubce.com/v2/ocr/paddleocr",

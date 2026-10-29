@@ -1,27 +1,42 @@
 {
-  "enabled": false,
-  "reason": "比赛阶段：评测集与现场补档均为模拟材料，赛题第五节允许调用云端模型。显式改为 true 才生效；正式环境禁止使用 competition_simulated 范围",
+  "enabled": true,
+  "reason": "方案3：OCR全文 → 27B结合原图与全文复核、推理及结构化输出",
   "authorized_scope": "competition_simulated",
   "page_budget_seconds": 60,
   "models": {
     "primary": {
-      "provider": "siliconflow",
-      "base_url": "https://api.siliconflow.cn/v1",
-      "model_id": "Qwen/Qwen3-VL-8B-Instruct",
-      "api_key_env": "AI_GUIJILIUDONG_SECRET",
+      "provider": "aliyun",
+      "base_url": "https://ws-gii3yuqz050k1sww.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "AI_ALIYUN_KEY",
       "authorized": true,
-      "open_weights": true,
-      "license": "Apache-2.0",
-      "model_card_url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct"
+      "identity_verified": false,
+      "weight_revision": null,
+      "model_id": "qwen-vl-ocr-2025-11-20",
+      "response_format": "ocr_text",
+      "open_weights": false
     },
     "secondary": {
       "provider": "aliyun",
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "model_id": "qwen-vl-ocr-2025-11-20",
-      "response_format": "ocr_text",
-      "api_key_env": "AI_ALIYUN_SECRET",
+      "base_url": "https://ws-gii3yuqz050k1sww.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "AI_ALIYUN_KEY",
       "authorized": true,
-      "open_weights": false
+      "identity_verified": false,
+      "weight_revision": null,
+      "model_id": "qwen3.5-27b",
+      "open_weights": true,
+      "catalog_id": "qwen3.5-27b",
+      "full_transcription": true,
+      "stream": true,
+      "enable_thinking": true,
+      "thinking_budget": 1024,
+      "max_tokens": 12000,
+      "license": "Apache-2.0",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen3.5-27B",
+      "save_text_revision": true,
+      "include_original_images": true
     }
-  }
+  },
+  "latency_evidence": "docs/模型接口耗时复测-2026-10-28.md",
+  "workflow": "ocr_then_qwen_image_text",
+  "document_context": false
 }

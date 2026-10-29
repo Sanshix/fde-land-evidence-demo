@@ -53,9 +53,12 @@ FDE_HOST=0.0.0.0 FDE_PORT=8765 FDE_USERS_FILE=$PWD/config/users.json \
 FDE_ALLOWED_ORIGINS=http://10.1.2.3:8765 FDE_SAMPLES_DIR=/data/正式导出 ./scripts/start.sh
 ```
 
-`FDE_ALLOWED_ORIGINS` 是浏览器地址栏里的地址（逗号分隔多个），用于拒绝跨站写入。离线安装包：联网构建机运行
-`python3.12 scripts/build_offline.py --output /abs/new/dir`，目标机 `FDE_PYTHON=python3.12 ./scripts/install.sh`
-（只用包内 wheel，`--no-index --require-hashes`；Python 运行时本身未打包，需目标机预装）。
+`FDE_ALLOWED_ORIGINS` 是浏览器地址栏里的地址（逗号分隔多个），用于拒绝跨站写入。
+
+**Windows / Linux 一键离线部署**：参见 [一键离线部署](docs/一键离线部署.md)。
+GitHub Actions 手动触发“双系统离线部署包”构建，分别在原生系统打包 Python 与全部运行依赖，合并为一个交付 artifact。目标机解压对应 ZIP 后，Windows 双击 `安装.cmd` / `启动.cmd`；Linux 执行 `sh 安装.sh` / `sh 启动.sh`。无需预装 Python。
+
+旧 `scripts/build_offline.py` 只生成 wheel 包，仍要求预装 Python，不满足干净机的一键安装目标。双平台可执行包须经过原生构建及目标机验收后方可声明完成交付。
 
 ## 模型配置与现场切换
 
@@ -139,3 +142,33 @@ node --check app/static/app.js
 - 百度现有 `AI_BAIDU_KEY` / `AI_BAIDU_SECRET` 是可用于 AI OCR 的应用凭据：OAuth 换 Token → 表单提交 PaddleOCR-VL 文档解析任务 → 5 秒间隔查询 → 获取 BOS JSON 结果。Token 仅驻留内存；查询超时保留 task_id，不自动重提。参考[官方请求案例](https://ai.baidu.com/ai-doc/OCR/3mi73at9o)。千帆 V2 Bearer 是另一种协议，只应使用独立的 `AI_BAIDU_QIANFAN_API_KEY`。
 
 验证记录：阿里 `runs/cloud-live-20261028T073841Z-aliyun/`；百度 `runs/cloud-live-20261028T073637Z-baidu/`。均使用 LX-017_1 模拟样张，证明调用成功，不代表字段准确率验收。百度未返回实际权重版本，适配器不推断版本、不伪造文字坐标，候选仍须人工核验。两个提供方配置保留按需启用及样张 hash 限制。
+
+### 云模型调用顺序（2026-10-28）
+
+默认及比赛配置按单页OCR实测中位耗时排序：阿里 Qwen VL OCR → 百度 PaddleOCR 服务 → 硅基流动 Qwen3 VL 8B → 硅基流动 PaddleOCR VL 1.5。阿里先由主队列执行；需要后备识别时保存首轮证据，将任务转入持久化的后备队列，主队列继续下一份材料。独立后台工作线程按百度 → 硅基 Qwen → 硅基 PaddleOCR 顺序逐级识别，不三路并发。后备排队时间单独记录，超过执行预期仍继续处理；重启时未开始的后备任务可继续，执行中断的任务标记 interrupted，需显式重试。人工修改版本、补件挂起或发布/撤回后，旧后备结果不会覆盖当前材料。第四阶段是独立 OCR，不是上下文推断。配置中的 enabled 与原有授权范围保持不变；单平台配置仍用于单独测试。耗时依据见 docs/模型接口耗时复测-2026-10-28.md，完整字段抽取耗时可能不同。
+
+## 比赛识别恢复与复核
+
+本轮修复说明及验收边界见 [比赛闭环修复与验收](docs/比赛闭环修复与验收.md)。待核验材料支持涂改前后原文区域对照、真人签章三选一、保存挂起后继续核验；未知请求默认不重发，已保存人工草稿不会被后台结果覆盖。
+
+独立模拟材料实跑使用 `scripts/competition_run.py --samples ../练习集 --run runs/competition-exercise --live`（通过 `.venv/bin/python` 运行）。它复制供应商配置到运行目录、使用独立数据库，保留实际前台与后备队列；不替代人工发布。独立评测集可把 `--samples` 改为 `../评测集`。
+
+实际 CSV/ZIP 导出评分使用 `scripts/score_submission.py`；冻结候选的字段覆盖诊断使用 `scripts/score_recognition.py`。用法、固定分母与情景对比见 [比赛评分口径](docs/比赛评分口径.md)。模型结果诊断不产生模拟发布分数。
+
+### 开源视觉推理模型切换（2026-10-29）
+
+管理员可在「系统管理 → 模型选择」加载并保存模型选择，支持七档 Qwen 开放权重模型及本地/阿里云调用。新选择采用单主模型与人工核验，不沿用原云端后备链路；可恢复部署文件配置。模型目录、理论权重内存、部署前提、思考流式协议及验证边界见 [选型说明](docs/开源推理模型选型-2026-10-29.md)。尚未将任一候选认定为本项目准确率最优，也未自动启用真实模型。
+
+### 2026-10-29 并发识别与执行时间观测
+
+前台与后备队列默认各两个工作线程，模型请求池也按队列隔离、各两个槽位。同一合同内部保持既有页面与后备模型顺序。启动前设置 `FDE_PRIMARY_WORKERS=1 FDE_FALLBACK_WORKERS=1` 可回到 1＋1，范围为 1–8；更改后需重启进程。
+
+240 秒单份预期和 20 分钟整批预期只用于统计，超过后继续执行。`competition_run.py --budget` 现在表示整批执行预期，不再作为截止时间。单次模型请求仍有独立超时（提供方 `request_timeout_seconds`，默认 120 秒）；结果未知的请求不会自动重发。后备排队和请求池等待不消耗单次请求额度，已超时但尚未结束的请求继续占用原请求槽位，避免实际并发突破上限。
+
+单份结果增加排队时间、阶段执行时间和超过预期标记；请求记录增加请求池等待时间。页面响应完成、字段正确、真人确认仍分别统计。服务停机后停止领取和新模型调用，短暂等待在途工作；强制退出留下的执行中任务在重启时标记 interrupted，需显式恢复。
+
+字段清洗保留原始证据；处理乙方标签、证件号粘连、重复日期、面积单位指数。`FDE_FIELD_CLEANUP=0` 仅用于冻结版本的对照实验，默认启用。多金额、不同坐落、原合同号与变更号等歧义仍需核验，不以答案选择候选。
+
+### Windows 内置运行时包
+
+可在任意构建机执行 `python scripts/build_windows_bundle.py --output /absolute/new/directory`，生成包含 Windows x64 官方嵌入式 Python、锁定依赖和源码的 ZIP。目标机完整解压后双击 `安装.cmd` 和 `启动.cmd`，无需预装 Python 或联网安装。此路线无需 PyInstaller；Windows 原生运行验收状态见包内清单。

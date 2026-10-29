@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import auth, governance, intake, operations, rules, store, triage
+from . import auth, governance, intake, operations, review_assistance, rules, store, triage
 from .business import (
     SAMPLES,
     calculate_documents,
@@ -28,13 +28,26 @@ from .business import (
     sources,
     suggest,
 )
+from .cloud_attempts import atomic_json, set_request_queue, worker_count
 from .cloud_cascade import run_cloud_cascade
-from .domain import DOCUMENT_ATTRIBUTES, FIELDS, validate_fields
-from .providers import public_status
+from .demo_api import register as register_demo
+from .domain import CHANGE_REQUIRED, REQUIRED, DOCUMENT_ATTRIBUTES, FIELDS, validate_fields
+from .providers import configuration, public_status
+from .workbench import register as register_workbench
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = None
 STOP = threading.Event()
+
+
+def source_data():
+    current = store.workspace.get()
+    return current['source'] if current else SOURCE
+
+
+def samples_directory():
+    current = store.workspace.get()
+    return Path(current['samples']) if current else SAMPLES
 
 
 def allowed_origins():
@@ -69,9 +82,9 @@ def check_version(doc, body):
         raise HTTPException(409, "文书已被修改，请刷新再操作")
 
 
-def queue(db, doc_id, strategy="cascade", fresh_budget=False):
+def queue(db, doc_id, strategy="cascade", fresh_budget=False, who=None):
     running = db.execute(
-        "SELECT id FROM jobs WHERE document_id=? AND state IN ('queued','running')", (doc_id,)
+        "SELECT id FROM jobs WHERE document_id=? AND state IN ('queued','running','fallback_queued','fallback_running')", (doc_id,)
     ).fetchone()
     if running:
         return running[0]
@@ -81,8 +94,8 @@ def queue(db, doc_id, strategy="cascade", fresh_budget=False):
     ).fetchone()[0]
     job = store.uid()
     db.execute(
-        "INSERT INTO jobs(id,document_id,state,strategy,created) VALUES(?,?,'queued',?,?)",
-        (job, doc_id, strategy, time.time() if fresh_budget else origin or time.time()),
+        "INSERT INTO jobs(id,document_id,state,strategy,created,actor,role,requested_at) VALUES(?,?,'queued',?,?,?,?,?)",
+        (job, doc_id, strategy, time.time() if fresh_budget else origin or time.time(), who, store.operation_role.get(), time.time()),
     )
     return job
 
@@ -91,7 +104,7 @@ def import_files(files, name, who, batch=None):
     if not files:
         raise ValueError("无可导入文件")
     batch = batch or store.uid()
-    objects = store.DATA / "objects"
+    objects = store.data_dir() / "objects"
     objects.mkdir(exist_ok=True)
     pages, file_hashes, manifests = [], [], []
     for filename, raw in files:
@@ -154,78 +167,116 @@ def import_files(files, name, who, batch=None):
         db.execute(
             "INSERT INTO occurrences(id,document_id,batch) VALUES(?,?,?)", (store.uid(), identifier, batch)
         )
-        queue(db, identifier)
+        queue(db, identifier, who=who)
         store.audit(db, who, "import", identifier, {"batch": batch, "digest": digest, "pages": len(pages)})
         return {"id": identifier, "duplicate": False, "batch": batch}
 
 
-def worker():
-    while not STOP.wait(0.5):
-        with store.connection() as db:
-            row = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY created LIMIT 1").fetchone()
-            if not row:
-                continue
-            job = dict(row)
-            document = store.doc_row(
-                db.execute("SELECT * FROM documents WHERE id=?", (job["document_id"],)).fetchone()
-            )
-            if not document or document["state"] in {"withdrawn", "published", "held"}:
-                db.execute("UPDATE jobs SET state='cancelled' WHERE id=?", (job["id"],))
-                continue
-            if time.time() - job["created"] > 1200:
-                db.execute(
-                    "UPDATE jobs SET state='failed',error='已超过整包20分钟预算，转人工' WHERE id=?",
-                    (job["id"],),
-                )
-                db.execute("UPDATE documents SET state='needs_human' WHERE id=?", (document["id"],))
-                continue
-            db.execute("UPDATE jobs SET state='running' WHERE id=?", (job["id"],))
+def worker_once(fallback=False, deadline=None, stop=None):
+    """One durable job phase. Foreground and fallback workers use separate queue states."""
+    set_request_queue(fallback, stop)
+    if stop is not None and stop.is_set():
+        return False
+    queued, running = ("fallback_queued", "fallback_running") if fallback else ("queued", "running")
+    if deadline is not None and time.time() >= deadline:
+        return False
+    with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM jobs WHERE state=? ORDER BY created LIMIT 1", (queued,)).fetchone()
+        if not row:
+            return False
+        job = dict(row)
+        document = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (job["document_id"],)).fetchone())
+        if not document or document["state"] in {"withdrawn", "published", "held"}:
+            db.execute("UPDATE jobs SET state='cancelled' WHERE id=?", (job["id"],))
+            return True
+        db.execute("UPDATE jobs SET state=? WHERE id=?", (running, job["id"]))
+        if not fallback:
             db.execute("UPDATE documents SET state='recognizing' WHERE id=?", (document["id"],))
-        run_dir = store.DATA / "runs" / document["id"]
-        try:
-            result = run_cloud_cascade(
-                document["pages"],
-                run_dir,
-                job["strategy"],
-                budget=min(180, 1200 - (time.time() - job["created"])),
-            )
+    phase_started = time.time()
+    run_dir = store.data_dir() / "runs" / document["id"]
+    continuation_path = run_dir / (job["id"] + "-continuation.json")
+    try:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        options_path = run_dir / (job["id"] + "-options.json")
+        options = json.loads(options_path.read_text()) if options_path.exists() else {}
+        retries = {"retry_failed": bool(options.get("retry_failed")),
+                   "retry_unknown": bool(options.get("retry_unknown"))}
+        current_workspace = store.workspace.get()
+        if job['strategy'] == 'demo_replay' or (current_workspace and current_workspace.get('mode') == 'replay'):
+            from .demo_replay import replay_document
+            if not current_workspace or current_workspace.get('mode') != 'replay':
+                raise ValueError('缓存回放只允许在测试空间运行')
+            result = replay_document(document, current_workspace, run_dir)
+            config = {}
+        elif fallback:
+            continuation = json.loads(continuation_path.read_text())
             with store.connection() as db:
-                # Do not overwrite a human decision made while recognition ran.
-                current = db.execute(
-                    "SELECT version,state FROM documents WHERE id=?", (document["id"],)
-                ).fetchone()
-                if current["version"] == document["version"] and current["state"] == "recognizing":
-                    db.execute(
-                        "UPDATE documents SET result=?,state='needs_human',version=version+1,updated=? WHERE id=?",
-                        (store.dumps(result), time.time(), document["id"]),
-                    )
-                db.execute("UPDATE jobs SET state='done',run_path=? WHERE id=?", (str(run_dir), job["id"]))
-                store.audit(
-                    db,
-                    "cloud-worker",
-                    "recognition",
-                    document["id"],
-                    {
-                        "run": job["id"],
-                        "elapsed": result["elapsed_seconds"],
-                        "mode": result["mode"],
-                        "external_calls": result.get("external_calls", 0),
-                        "risks": len(result["risks"]),
-                    },
-                )
-        except Exception as e:
-            with store.connection() as db:
-                db.execute(
-                    "UPDATE jobs SET state='failed',error=?,run_path=? WHERE id=?",
-                    (str(e)[:1000], str(run_dir), job["id"]),
-                )
-                db.execute(
-                    "UPDATE documents SET state='needs_human' WHERE id=? AND state='recognizing'",
-                    (document["id"],),
-                )
-                store.audit(
-                    db, "cloud-worker", "recognition_failed", document["id"], {"error": type(e).__name__}
-                )
+                human_draft = db.execute("SELECT 1 FROM review_drafts WHERE document_id=? AND version=?",
+                                         (document["id"], document["version"])).fetchone()
+            if document["version"] != continuation["version"] or human_draft:
+                with store.connection() as db:
+                    db.execute("UPDATE jobs SET state='cancelled',error='人工已修改材料，取消后备结果回写' WHERE id=?", (job["id"],))
+                return True
+            budget = float((current_workspace or {}).get("budget_seconds", float("inf")))
+            config = continuation["config"]
+            result = run_cloud_cascade(document["pages"], run_dir, job["strategy"], budget=budget,
+                                       config=config, primary_result=continuation["result"], **retries)
+        else:
+            config = (current_workspace or {}).get('model_config') or configuration()
+            budget = float((current_workspace or {}).get("budget_seconds", float("inf")))
+            result = run_cloud_cascade(document["pages"], run_dir, job["strategy"], budget=budget,
+                                       config=config, defer_fallback=job["strategy"] == "cascade", **retries)
+        result["queue_wait_seconds"] = round(max(0, phase_started - (
+            continuation.get("queued_at", phase_started) if fallback else job["created"])), 3)
+        result["phase_execution_seconds"] = round(time.time() - phase_started, 3)
+        result["exceeded_document_expectation"] = time.time() - job["created"] > 240
+        pending = not fallback and job["strategy"] == "cascade" and result.get("fallback_pending", False)
+        if pending:
+            atomic_json(continuation_path, {"version": document["version"] + 1,
+                "queued_at": time.time(), "config": config, "result": result})
+        with store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            expected_state = "needs_human" if fallback else "recognizing"
+            changed = db.execute(
+                "UPDATE documents SET result=?,state='needs_human',version=version+1,updated=? "
+                "WHERE id=? AND version=? AND state=? AND NOT EXISTS ("
+                "SELECT 1 FROM review_drafts WHERE document_id=documents.id AND version=documents.version)",
+                (store.dumps(result), time.time(), document["id"], document["version"], expected_state),
+            ).rowcount
+            if not changed:
+                db.execute("UPDATE documents SET state='needs_human' WHERE id=? AND version=? AND state='recognizing'",
+                           (document["id"], document["version"]))
+            final_state = {"partial": "partial", "unknown": "unknown", "failed": "failed"}.get(
+                result.get("completion_status"), "done")
+            state = ("fallback_queued" if pending else final_state) if changed else "cancelled"
+            if changed and stop is not None and stop.is_set():
+                state = "interrupted"
+            db.execute("UPDATE jobs SET state=?,run_path=? WHERE id=?", (state, str(run_dir), job["id"]))
+            store.audit(db, "cloud-worker", "recognition_fallback" if fallback else "recognition_primary",
+                        document["id"], {"run": job["id"], "elapsed": result["elapsed_seconds"],
+                        "mode": result["mode"], "external_calls": result.get("external_calls", 0),
+                        "risks": len(result["risks"]), "job_state": state, "applied": bool(changed)})
+    except Exception as e:
+        with store.connection() as db:
+            db.execute("UPDATE jobs SET state='failed',error=?,run_path=? WHERE id=?",
+                       (str(e)[:1000], str(run_dir), job["id"]))
+            db.execute("UPDATE documents SET state='needs_human' WHERE id=? AND version=? AND state='recognizing'",
+                       (document["id"], document["version"]))
+            store.audit(db, "cloud-worker", "recognition_failed", document["id"], {"error": type(e).__name__})
+    return True
+
+
+def worker(fallback=False, stop=None):
+    stop = STOP if stop is None else stop
+    while not stop.wait(0.5):
+        worker_once(fallback=fallback, stop=stop)
+
+
+def worker_threads(target):
+    return [threading.Thread(target=target, args=(fallback,), daemon=True,
+            name=("fallback" if fallback else "primary") + f"-{index}")
+            for fallback in (False, True) for index in range(worker_count(fallback))]
 
 
 @asynccontextmanager
@@ -234,11 +285,25 @@ async def lifespan(app):
     store.init()
     SOURCE = sources()
     rules.initialize(SOURCE)
+    generation_stop = threading.Event()
     STOP.clear()
     if not os.environ.get("FDE_DISABLE_WORKER"):
-        threading.Thread(target=worker, daemon=True).start()
-    yield
-    STOP.set()
+        threads = worker_threads(lambda fallback: worker(fallback, generation_stop))
+        for thread in threads:
+            thread.start()
+    try:
+        from . import demo_runs
+        demo_runs.initialize()
+        yield
+    finally:
+        from . import demo_runs
+        demo_runs.shutdown()
+        generation_stop.set()
+        STOP.set()
+        if not os.environ.get("FDE_DISABLE_WORKER"):
+            end = time.monotonic() + 5
+            for thread in threads:
+                thread.join(max(0, end - time.monotonic()))
 
 
 app = FastAPI(title="国有土地租赁 · 证据工作台", lifespan=lifespan)
@@ -254,7 +319,12 @@ async def authentication(request, call_next):
                 status_code=401, headers={"WWW-Authenticate": 'Basic realm="FDE local", charset="UTF-8"'}
             )
         request.state.identity = identity
-    return await call_next(request)
+    identity = getattr(request.state, "identity", None)
+    token = store.operation_role.set(identity["role"] if identity else request.headers.get("x-fde-role"))
+    try:
+        return await call_next(request)
+    finally:
+        store.operation_role.reset(token)
 
 
 @app.get("/healthz")
@@ -284,19 +354,96 @@ def favicon():
     return Response(status_code=204)
 
 
+@app.get("/api/model-settings")
+def get_model_settings(request: Request):
+    actor(request, admin=True)
+    from . import model_settings
+    from .providers import base_configuration
+    with store.connection() as db:
+        return model_settings.status(base_configuration(), db)
+
+
+@app.post("/api/model-settings")
+async def set_model_settings(request: Request):
+    who = actor(request, admin=True)
+    from . import model_settings
+    from .providers import base_configuration
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "配置必须为对象")
+    try:
+        with store.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            model_settings.save(base_configuration(), db, body, who)
+            return model_settings.status(base_configuration(), db)
+    except RuntimeError as error:
+        raise HTTPException(409, str(error)) from error
+    except (ValueError, TypeError) as error:
+        raise HTTPException(400, str(error)) from error
+
+
+def assessed_documents():
+    documents = store.list_docs()
+    with store.connection() as db:
+        for doc in documents:
+            attach_assessment(db, doc)
+            doc['confidence'] = {k: v for k, v in doc['confidence'].items() if k != 'fields'}
+    return documents
+
+
+def attach_assessment(db, doc):
+    from . import confidence
+    if doc['state'] == 'needs_human':
+        t = batch_candidate(db, doc)
+        doc['confidence'] = t['confidence']
+        doc['processing_state'] = t['processing_state']
+    else:
+        snapshot = (doc.get('review') or {}).get('machine_confidence')
+        if snapshot:
+            doc['confidence'] = snapshot
+        else:
+            gate = triage.triage({**doc, 'state': 'needs_human'})
+            doc['confidence'] = confidence.persist(db, doc, gate['confidence'])
+        doc['processing_state'] = doc['state']
+    if doc['state'] != 'needs_human':
+        db.execute("INSERT OR REPLACE INTO routing_assessments(document_id,document_version,processing_state,confidence_level,payload,updated) VALUES(?,?,?,?,?,?)",
+                   (doc['id'], doc['version'], doc['processing_state'], doc['confidence']['level'], store.dumps(doc['confidence']), time.time()))
+    doc['field_verification'] = (doc.get('review') or {}).get('field_verification', {})
+    if doc['state'] != 'published':
+        doc['field_verification'] = {}
+
+
+def pending_withdrawals():
+    with store.connection() as db:
+        return [dict(r) for r in db.execute("SELECT w.id,w.document_id,w.created,d.name FROM withdrawal_requests w JOIN documents d ON d.id=w.document_id WHERE w.status='pending' ORDER BY w.created")]
+
+
 @app.get("/api/status")
 def status():
     with store.connection() as db:
-        jobs = [dict(r) for r in db.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT 30")]
+        jobs = [dict(r) for r in db.execute("SELECT * FROM jobs ORDER BY COALESCE(requested_at,created) DESC LIMIT 30")]
+        operations_log = [dict(r) for r in db.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 50")]
     return {
+        "test_space": ({k: v for k, v in store.workspace.get().items() if k in {"id", "dataset", "mode"}} if store.workspace.get() else None),
         "batches": batch_status(),
         "fields": FIELDS,
-        "documents": store.list_docs(),
+        "required_fields": sorted(REQUIRED),
+        "change_required_fields": sorted(CHANGE_REQUIRED),
+        "documents": assessed_documents(),
+        "withdrawals": pending_withdrawals(),
         "jobs": jobs,
+        "operations_log": operations_log,
         "as_of": "2026-09-30",
         "models": public_status(),
         "scope": "本机演示身份；不是生产认证。核心闭环已实现，完整13类问题/全量评价仍待验证。",
     }
+
+
+@app.get("/api/documents/{identifier}/transcription.txt")
+def download_transcription(identifier):
+    from . import transcription
+    return Response(transcription.export(require_doc(identifier)), media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="transcription.txt"'})
 
 
 @app.get("/api/documents/{identifier}")
@@ -305,6 +452,28 @@ def document(identifier):
     with store.connection() as db:
         draft = db.execute("SELECT * FROM review_drafts WHERE document_id=?", (identifier,)).fetchone()
         doc["draft"] = json.loads(draft["payload"]) if draft and draft["version"] == doc["version"] else None
+        from .evidence import normalized_candidates, valid_anchor
+        candidates_for_fill = normalized_candidates((doc.get("result") or {}).get("candidates", {}))
+        doc["identifier_formats"] = {
+            key: [c["identifier_format"] for c in rows if "identifier_format" in c]
+            for key, rows in candidates_for_fill.items() if key in {"contract_no", "original_contract_no"}
+        }
+        units = {p["id"]: p for p in doc["pages"]}
+        prefill = {"fields": {}, "citations": {}, "citation_details": {}}
+        for key, rows in candidates_for_fill.items():
+            usable = [c for c in rows if c.get("kind") != "context_suggestion" and c.get("text_role") not in {"crossed_out", "alternative"}]
+            if not usable:
+                continue
+            c = max(usable, key=lambda c: (valid_anchor(c, units), c.get("score") or 0))
+            prefill["fields"][key] = c["value"]
+            unit = c.get("source_page_id")
+            # A known image page is sufficient for a page-level citation. Missing region
+            # coordinates must not make users choose the same page again manually.
+            if unit in units and (units[unit].get("kind") != "native" or valid_anchor(c, units)):
+                prefill["citations"][key] = unit
+                prefill["citation_details"][key] = ([{"unit_id": unit, "locator": loc} for loc in c.get("source_locator", "").split(" + ") if loc]
+                    if units[unit].get("kind") == "native" else [{"unit_id": unit, **({"bbox": c["bbox"]} if valid_anchor(c, units) else {})}])
+        doc["prefill"] = prefill
         doc["governance_issues"] = governance.issues_for(doc)
         candidates = (doc.get("result") or {}).get("candidates", {})
         first = {k: (v[0]["value"] if v else "") for k, v in candidates.items()}
@@ -320,6 +489,14 @@ def document(identifier):
         doc["audit"] = [
             dict(r) for r in db.execute("SELECT * FROM audit WHERE target=? ORDER BY id DESC", (identifier,))
         ]
+        attach_assessment(db, doc)
+        doc["withdrawal_requests"] = [dict(r) for r in db.execute(
+            "SELECT * FROM withdrawal_requests WHERE document_id=? ORDER BY id DESC", (identifier,))]
+        doc["review_assistance"] = review_assistance.assistance(doc)
+        from . import transcription
+        doc["transcription_pages"] = transcription.pages(doc)
+        adopted = doc.get("draft") or doc.get("review") or {}
+        doc["obligation_matches"] = suggest({**prefill["fields"], **adopted.get("fields", {})}, active_source())
     return doc
 
 
@@ -365,7 +542,7 @@ def sample(name: str, request: Request):
         "LX-025",
     }:
         raise HTTPException(400, "快捷导入仅限声明过的开发集；留出集不在此入口")
-    files = sorted((SAMPLES / "01_合同扫描件").glob(name + "_*.jpg"))
+    files = sorted((samples_directory() / "01_合同扫描件").glob(name + "_*.jpg"))
     return import_files([(f.name, f.read_bytes()) for f in files], name, who)
 
 
@@ -379,7 +556,7 @@ async def retry(identifier, request: Request):
         raise HTTPException(409, "已发布/撤回材料不允许直接覆盖识别证据")
     with store.connection() as db:
         active = db.execute(
-            "SELECT 1 FROM jobs WHERE document_id=? AND state IN ('queued','running')", (identifier,)
+            "SELECT 1 FROM jobs WHERE document_id=? AND state IN ('queued','running','fallback_queued','fallback_running')", (identifier,)
         ).fetchone()
     if active:
         # 否则版本号被抬高、运行中的任务结果被丢弃，文书会永久停在“等待处理”
@@ -387,10 +564,29 @@ async def retry(identifier, request: Request):
     strategy = body.get("strategy", "cascade")
     if strategy not in {"cascade", "primary"}:
         raise HTTPException(400, "未知识别策略")
+    if body.get("retry_unknown") is not None and type(body["retry_unknown"]) is not bool:
+        raise HTTPException(400, "retry_unknown 必须为布尔值")
+    retry_unknown = body.get("retry_unknown") is True
+    if retry_unknown and not str(body.get("reason") or "").strip():
+        raise HTTPException(400, "重发结果未知的请求须说明已核查的依据及接受可能重复计费")
     with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        current = db.execute("SELECT version,state FROM documents WHERE id=?", (identifier,)).fetchone()
+        if not current:
+            raise HTTPException(404)
+        if current["version"] != body["version"]:
+            raise HTTPException(409, "文书已被修改，请刷新再操作")
+        if current["state"] in {"published", "withdrawn"} or db.execute(
+            "SELECT 1 FROM jobs WHERE document_id=? AND state IN ('queued','running','fallback_queued','fallback_running')", (identifier,)
+        ).fetchone():
+            raise HTTPException(409, "材料状态或识别任务已变化，请刷新")
         db.execute("UPDATE documents SET state='queued',version=version+1 WHERE id=?", (identifier,))
-        job = queue(db, identifier, strategy, fresh_budget=True)
-        store.audit(db, who, "retry", identifier, {"strategy": strategy, "job": job})
+        job = queue(db, identifier, strategy, fresh_budget=True, who=who)
+        folder = store.data_dir() / "runs" / identifier
+        folder.mkdir(parents=True, exist_ok=True)
+        options = {"retry_failed": True, "retry_unknown": retry_unknown, "reason": str(body.get("reason") or "用户显式恢复识别")[:1000]}
+        atomic_json(folder / (job + "-options.json"), options)
+        store.audit(db, who, "retry", identifier, {"strategy": strategy, "job": job, **options})
     return {"job": job}
 
 
@@ -405,12 +601,46 @@ async def hold(identifier, request: Request):
     if not body.get("reason"):
         raise HTTPException(400, "需说明不可辨认之处和补扫要求")
     with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        current = db.execute("SELECT * FROM documents WHERE id=?", (identifier,)).fetchone()
+        check_version(dict(current), body)
+        if current["state"] in {"published", "withdrawn"}:
+            raise HTTPException(409, "已发布或撤回材料不能挂起")
         db.execute(
             "UPDATE documents SET state='held',version=version+1,updated=? WHERE id=?",
             (time.time(), identifier),
         )
+        db.execute("UPDATE review_drafts SET version=version+1 WHERE document_id=? AND version=?",
+                   (identifier, doc["version"]))
+        db.execute("UPDATE jobs SET state='cancelled' WHERE document_id=? AND state IN ('queued','fallback_queued')",
+                   (identifier,))
         store.audit(db, who, "hold_for_rescan", identifier, {"reason": body["reason"][:1000]})
     return {"state": "held"}
+
+
+@app.post("/api/documents/{identifier}/resume-review")
+async def resume_review(identifier, request: Request):
+    """Continue a human decision without paying to read the same source again."""
+    who = actor(request)
+    body = await request.json()
+    if not str(body.get("reason") or "").strip():
+        raise HTTPException(400, "请说明继续核验的依据")
+    with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        doc = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (identifier,)).fetchone())
+        if not doc:
+            raise HTTPException(404)
+        check_version(doc, body)
+        if doc["state"] != "held":
+            raise HTTPException(409, "仅挂起的材料可继续人工核验")
+        db.execute("UPDATE documents SET state='needs_human',version=version+1,updated=? WHERE id=?",
+                   (time.time(), identifier))
+        db.execute("UPDATE review_drafts SET version=version+1 WHERE document_id=? AND version=?",
+                   (identifier, doc["version"]))
+        db.execute("UPDATE jobs SET state='cancelled' WHERE document_id=? AND state IN ('queued','fallback_queued')",
+                   (identifier,))
+        store.audit(db, who, "resume_human_review", identifier, {"reason": body["reason"][:1000], "new_cloud_calls": 0})
+    return {"state": "needs_human", "version": doc["version"] + 1, "new_cloud_calls": 0}
 
 
 @app.post("/api/documents/{identifier}/page")
@@ -429,7 +659,7 @@ async def adjust_page(identifier, request: Request):
         raise HTTPException(400, "原生结构化单元不支持旋转或调页")
     if body.get("action") == "rotate":
         p = pages[index]
-        dest = store.DATA / "objects" / f"{p['id']}-r{doc['version']}.png"
+        dest = store.data_dir() / "objects" / f"{p['id']}-r{doc['version']}.png"
         with Image.open(p["path"]) as image:
             image.rotate(-90, expand=True).save(dest)
         p["path"] = str(dest)
@@ -457,14 +687,14 @@ async def preview(identifier, request: Request):
         f = normalize_fields(body.get("fields", {}))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    errors = validate_fields(f)
-    matches = suggest(f, SOURCE)
+    errors = validate_fields(f) + governance.validate_alteration_review(doc, body)
+    matches = suggest(f, source_data())
     if errors:
         return {"errors": errors, "matches": matches}
     with store.connection() as db:
         target, others = parcel_context(db, f, identifier)
         siblings = parcel_documents(db, [target, *others] if target else [], identifier)
-    matches = suggest(f, SOURCE, [d["review"]["fields"] for d in siblings])
+    matches = suggest(f, source_data(), [d["review"]["fields"] for d in siblings])
     doc["review"] = {
         "fields": f,
         "evidence_clear": True,
@@ -479,9 +709,9 @@ async def preview(identifier, request: Request):
         previous = store.latest(db, target) if target else None
     try:
         with store.connection() as db:
-            source = rules.source_for(db, SOURCE)
+            source = rules.source_for(db, source_data())
             validate_payment_ownership(db, current + [doc], {target, *others}, source)
-            calculation = calculate_documents(current + [doc], source)
+            _, _, calculation = prepare_publication(db, doc, f, identifier, create=False)
     except ValueError as e:
         return {"errors": [str(e)], "matches": matches}
     return {
@@ -491,6 +721,63 @@ async def preview(identifier, request: Request):
         "previous": previous,
         "draft_hash": review_hash(doc, body, calculation),
     }
+
+
+@app.post("/api/documents/{identifier}/obligation-preview")
+async def obligation_preview(identifier, request: Request):
+    """A separate non-publishing state; unresolved payments never become zero."""
+    actor(request)
+    body = await request.json()
+    doc = require_doc(identifier)
+    check_version(doc, body)
+    if not body.get("obligation_evidence_clear") or not body.get("obligation_reliefs_reviewed"):
+        raise HTTPException(400, "请先核对本期计租要素及适用减免")
+    from .obligations import contract_obligation
+    try:
+        f = normalize_fields(body.get("fields", {}))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if f.get("doc_type") == "变更":
+        raise HTTPException(400, "变更件不能独立确定应缴，请关联原合同")
+    with store.connection() as db:
+        source = rules.source_for(db, source_data())
+        saved = db.execute("SELECT payload FROM review_drafts WHERE document_id=? AND version=?",
+                           (identifier, doc["version"])).fetchone()
+    # A client omitting known draft uncertainty must not erase its financial gate.
+    known_unresolved = set(json.loads(saved["payload"]).get("unresolved_fields", [])) if saved else set()
+    known_unresolved.update(body.get("unresolved_fields", []))
+    keys = {"start", "end", "mode"} | ({"annual"} if f.get("mode") == "固定" else {"area", "use", "grade"})
+    if f.get("mode") == "固定" and f.get("annual_upper"):
+        keys.add("annual_upper")
+    grade_basis = "合同载明"
+    if f.get("mode") == "随标准调整" and not f.get("grade"):
+        from .business import known_streets, street_grade
+        f["grade"] = street_grade(f.get("address"), known_streets(source)) or ""
+        keys.remove("grade")
+        keys.add("address")
+        grade_basis = "05土地级别范围表与合同坐落匹配；未写回原件字段"
+    valid_pages = {p["id"] for p in doc["pages"]}
+    if any(body.get("citations", {}).get(k) not in valid_pages for k in keys):
+        raise HTTPException(400, "每个本期计租要素必须关联原件页")
+    termination_month = body.get("termination_month")
+    if termination_month is not None and (not body.get("termination_month_source_reviewed")
+            or body.get("citations", {}).get("termination_month") not in valid_pages):
+        raise HTTPException(400, "收回月份必须有核对过的原件引用")
+    if source.get("policy", {}).get("rounding", "half_up") != "half_up":
+        raise HTTPException(400, "本期应缴预览仅支持四舍五入到分口径")
+    wanted = set(body.get("relief_ids", []))
+    reliefs = [r for r in source["reliefs"] if r["批准文号"] in wanted]
+    if {r["批准文号"] for r in reliefs} != wanted:
+        raise HTTPException(400, "选中的减免依据不存在")
+    matches = suggest(f, source)
+    if matches.get("ambiguous") or not wanted <= {r["批准文号"] for r in matches["reliefs"]}:
+        raise HTTPException(400, "减免适用范围与本合同不一致或尚未明确")
+    try:
+        result = contract_obligation(f, source["rates"], reliefs,
+                                     unresolved=known_unresolved, termination_month=termination_month)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {**result, "grade": f.get("grade"), "grade_basis": grade_basis, "rate_version": source["rate_version"], "document_version": doc["version"]}
 
 
 @app.post("/api/documents/{identifier}/confirm")
@@ -521,6 +808,8 @@ async def confirm(identifier, request: Request):
         if not doc:
             raise HTTPException(404)
         check_version(doc, body)
+        from .approval import gate
+        gate(db, identifier, request)
         if doc["state"] in {"held", "withdrawn", "published"}:
             raise HTTPException(409, "挂起请先重新识别；已发布先撤回；已撤回先重导")
         quality_errors = governance.validate_completeness(doc, body) + governance.validate_citations(
@@ -539,6 +828,7 @@ async def confirm(identifier, request: Request):
             "material_complete": True,
             "confirm_calculation": True,
             "quality_resolutions": body.get("quality_resolutions", {}),
+            "alteration_review": body.get("alteration_review"),
             "intake_version": (doc.get("intake") or {}).get("unit_count"),
             "evidence_clear": True,
             "payment_ids": body.get("payment_ids", []),
@@ -549,7 +839,7 @@ async def confirm(identifier, request: Request):
             "actor": who,
             "at": time.time(),
             "review_elapsed_seconds": body.get("review_elapsed_seconds"),
-            "method": "人工复核",
+            "method": "测试空间手动核验" if store.workspace.get() else "人工复核",
         }
         try:
             parcel_id, others, calculation = prepare_publication(db, doc, f, identifier)
@@ -593,7 +883,15 @@ def validate_payment_ownership(db, docs, parcel_ids, source):
 def prepare_publication(db, doc, fields, identifier, create=True):
     parcel_id, others = parcel_context(db, fields, identifier)
     current = parcel_documents(db, [parcel_id, *others], identifier)
-    source = rules.source_for(db, SOURCE)
+    revision_of = (doc.get('intake') or {}).get('revision_of')
+    if revision_of:
+        original = store.doc_row(db.execute('SELECT * FROM documents WHERE id=?', (revision_of,)).fetchone())
+        if not original or original['state'] != 'published' or original['version'] != doc['intake']['revision_version']:
+            raise ValueError('原合同已变化，请重新建立修订')
+        if original['parcel_id'] != parcel_id or others:
+            raise ValueError('修订不能改变归属宗地；请走撤回与重新归集流程')
+        current = [d for d in current if d['id'] != revision_of]
+    source = rules.source_for(db, source_data())
     validate_payment_ownership(db, current + [doc], {parcel_id, *others}, source)
     calculation = calculate_documents(current + [doc], source)
     if create:
@@ -603,6 +901,16 @@ def prepare_publication(db, doc, fields, identifier, create=True):
 
 def commit_publication(db, doc, old, parcel_id, others, calculation, who, action):
     identifier = doc["id"]
+    revision_of = (doc.get('intake') or {}).get('revision_of')
+    if revision_of:
+        db.execute("UPDATE documents SET state='withdrawn',version=version+1,updated=? WHERE id=?", (time.time(), revision_of))
+        store.audit(db, who, 'contract_revision_superseded', revision_of, {'replacement': identifier})
+    from . import confidence
+    assessment = batch_candidate(db, doc)['confidence']
+    doc['review']['machine_confidence'] = assessment
+    doc['review']['field_verification'] = confidence.verification(assessment, doc['review']['fields'])
+    db.execute("INSERT OR REPLACE INTO routing_assessments(document_id,document_version,processing_state,confidence_level,payload,updated) VALUES(?,?,?,?,?,?)",
+               (identifier, doc['version'] + 1, 'published', assessment['level'], store.dumps(assessment), time.time()))
     db.execute(
         "UPDATE documents SET review=?,parcel_id=?,state='published',version=version+1,updated=? WHERE id=?",
         (store.dumps(doc["review"]), parcel_id, time.time(), identifier),
@@ -618,8 +926,9 @@ def commit_publication(db, doc, old, parcel_id, others, calculation, who, action
         # 原合同编号把两组材料连成同一宗地：并入并保留历史快照
         db.execute("UPDATE documents SET parcel_id=? WHERE parcel_id=? AND state='published'", (parcel_id, other))
         db.execute("UPDATE parcels SET merged_into=? WHERE id=?", (parcel_id, other))
-        store.publish(db, other, calculate_documents([], SOURCE), who)
+        store.publish(db, other, calculate_documents([], source_data()), who)
         store.audit(db, who, "parcel_merge", other, {"into": parcel_id, "by_document": identifier})
+    db.execute("UPDATE contract_approvals SET status='archived',updated=? WHERE document_id=?", (time.time(), identifier))
     return store.publish(db, parcel_id, calculation, who)
 
 
@@ -636,13 +945,26 @@ def batch_candidates():
 
 
 def batch_candidate(db, doc):
+    from . import confidence
+    t = _batch_candidate(db, doc)
+    t['confidence'] = confidence.restrict(t['confidence'], t['blockers'])
+    t['eligible'] = bool(t['eligible'] and t['confidence']['batch_eligible'])
+    t['processing_state'] = 'pending_confirmation' if t['eligible'] and t['confidence']['batch_eligible'] else 'needs_human'
+    db.execute("INSERT OR REPLACE INTO routing_assessments(document_id,document_version,processing_state,confidence_level,payload,updated) VALUES(?,?,?,?,?,?)",
+               (doc['id'], doc['version'], t['processing_state'], t['confidence']['level'], store.dumps(t['confidence']), time.time()))
+    return t
+
+
+def _batch_candidate(db, doc):
+    from . import confidence
     t = triage.triage(doc)
+    t['confidence'] = confidence.persist(db, doc, t['confidence'])
     if not t["eligible"]:
         return t
     try:
         target, others = parcel_context(db, t["fields"], doc["id"])
         siblings = parcel_documents(db, [target, *others], doc["id"])
-        matches = suggest(t["fields"], SOURCE, [d["review"]["fields"] for d in siblings])
+        matches = suggest(t["fields"], source_data(), [d["review"]["fields"] for d in siblings])
         if matches.get("ambiguous") or any(p.get("match_strength") == "weak" for p in matches["payments"]):
             raise ValueError("缴费存在同名弱匹配或归宗歧义，须逐项人工核对，不可批量入账")
         review = {
@@ -661,6 +983,7 @@ def batch_candidate(db, doc):
     except ValueError as error:
         t["eligible"] = False
         t["reasons"].append(str(error))
+        t['blockers'].append({'field': None, 'code': 'business_conflict', 'message': str(error)})
     return t
 
 
@@ -682,6 +1005,12 @@ async def batch_confirm(request: Request):
             doc = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (identifier,)).fetchone())
             if not doc or doc["version"] != item.get("version"):
                 results.append({"id": identifier, "published": False, "reason": "文书不存在或已变化"})
+                continue
+            from .approval import gate
+            try:
+                gate(db, identifier, request)
+            except HTTPException as exc:
+                results.append({"id": identifier, "published": False, "reason": exc.detail})
                 continue
             t = batch_candidate(db, doc)
             if not t["eligible"]:
@@ -712,9 +1041,32 @@ async def batch_confirm(request: Request):
     return {"results": results, "published": sum(r["published"] for r in results)}
 
 
+@app.post("/api/documents/{identifier}/withdraw-request")
+async def request_withdrawal(identifier, request: Request):
+    who = actor(request)
+    body = await request.json()
+    reason = str(body.get("reason", "")).strip()
+    if not reason or len(reason) > 2000:
+        raise HTTPException(400, "请填写撤回原因（最多2000字）")
+    with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        doc = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (identifier,)).fetchone())
+        if not doc:
+            raise HTTPException(404)
+        check_version(doc, body)
+        if doc["state"] != "published":
+            raise HTTPException(409, "仅已登记合同可申请撤回")
+        if db.execute("SELECT 1 FROM withdrawal_requests WHERE document_id=? AND status='pending'", (identifier,)).fetchone():
+            raise HTTPException(409, "已有待审核的撤回申请")
+        cursor = db.execute("INSERT INTO withdrawal_requests(document_id,version,reason,actor,created) VALUES(?,?,?,?,?)",
+                            (identifier, doc["version"], reason, who, time.time()))
+        store.audit(db, who, "withdraw_requested", identifier, {"request_id": cursor.lastrowid, "reason": reason})
+    return {"status": "pending"}
+
+
 @app.post("/api/documents/{identifier}/withdraw")
 async def withdraw(identifier, request: Request):
-    who = actor(request)
+    who = actor(request, admin=True)
     body = await request.json()
     with store.connection() as db:
         db.execute("BEGIN IMMEDIATE")
@@ -724,6 +1076,21 @@ async def withdraw(identifier, request: Request):
         check_version(doc, body)
         if not body.get("reason"):
             raise HTTPException(400, "请填写撤回依据")
+        application = db.execute("SELECT * FROM withdrawal_requests WHERE id=? AND document_id=? AND status='pending'",
+                                 (body.get("request_id"), identifier)).fetchone()
+        if not application:
+            raise HTTPException(409, "请先提交撤回申请，再由管理员审核")
+        if application["version"] != doc["version"] or doc["state"] != "published":
+            raise HTTPException(409, "合同版本已变化，请重新核实申请")
+        decision = body.get("decision")
+        if decision not in {"approve", "reject"}:
+            raise HTTPException(400, "请选择通过或驳回")
+        db.execute("UPDATE withdrawal_requests SET status=?,reviewer=?,review_reason=?,reviewed=? WHERE id=?",
+                   (decision, who, body["reason"], time.time(), application["id"]))
+        store.audit(db, who, "withdraw_reviewed", identifier,
+                    {"request_id": application["id"], "decision": decision, "reason": body["reason"]})
+        if decision == "reject":
+            return {"status": "rejected"}
         if body.get("batch"):
             db.execute(
                 "UPDATE occurrences SET active=0 WHERE document_id=? AND batch=?", (identifier, body["batch"])
@@ -743,7 +1110,7 @@ async def withdraw(identifier, request: Request):
                 doc["parcel_id"] = follow_parcel(db, doc["parcel_id"])
                 current = parcel_documents(db, [doc["parcel_id"]])
                 try:
-                    payload = calculate_documents(current, rules.source_for(db, SOURCE))
+                    payload = calculate_documents(current, rules.source_for(db, source_data()))
                 except ValueError as e:
                     raise HTTPException(409, "撤回引出依赖冲突，保持旧快照：" + str(e)) from e
                 publication = store.publish(db, doc["parcel_id"], payload, who)
@@ -769,9 +1136,20 @@ def ledger(street: str = "", status: str = "", arrears: str = "", keyword: str =
 
 
 @app.get("/api/reminders")
-def reminders(format: str = "json"):
+def reminders(format: str = "json", today: str = "", kind: str = "", level: str = "", start: str = "", end: str = ""):
+    from datetime import date
+    try:
+        viewing = date.fromisoformat(today) if today else date.today()
+        start_day = date.fromisoformat(start) if start else None
+        end_day = date.fromisoformat(end) if end else None
+        if start_day and end_day and start_day > end_day:
+            raise ValueError("范围起始日晚于结束日")
+    except ValueError as exc:
+        raise HTTPException(400, "无效日期或起始日晚于结束日") from exc
     with store.connection() as db:
-        items = operations.reminders(operations.entries(db))
+        items = operations.reminders(operations.entries(db), today=viewing, horizon_days=90)
+        items = [r for r in items if (not start_day or r["date"] >= start_day.isoformat()) and (not end_day or r["date"] <= end_day.isoformat())]
+        items = [r for r in items if (not kind or r["kind"] == kind) and (not level or r["level"] == level)]
     if format == "ics":
         return Response(
             operations.ics(items),
@@ -782,9 +1160,10 @@ def reminders(format: str = "json"):
 
 
 @app.get("/api/stats")
-def stats(format: str = "json"):
+def stats(format: str = "json", street: str = "", status: str = "", arrears: str = "", keyword: str = ""):
     with store.connection() as db:
         rows = operations.entries(db)
+    rows = operations.filtered(rows, street or None, status or None, arrears or None, keyword or None)
     result = operations.statistics(rows)
     if format == "csv":
         flat = [{"指标": k, "值": v} for k, v in result.items() if not isinstance(v, dict)]
@@ -801,9 +1180,10 @@ def stats(format: str = "json"):
 @app.post("/api/notices/{publication_id}")
 def notice(publication_id: int, request: Request):
     who = actor(request)
-    from .outputs import notice_docx, notice_settings, sms_text
+    from .outputs import notice_docx, notice_settings, sms_text, template
 
     with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT * FROM publications WHERE id=?", (publication_id,)).fetchone()
         if not row:
             raise HTTPException(404)
@@ -817,7 +1197,24 @@ def notice(publication_id: int, request: Request):
             db.execute("SELECT * FROM documents WHERE id=?", (payload["latest_document"],)).fetchone()
         )
         settings = notice_settings()
+        generation = {
+            "publication": publication_id,
+            "publication_digest": row["digest"],
+            "settings": settings,
+            "template_sha256": hashlib.sha256(
+                template("国有土地租金催缴通知书（模板）.docx").read_bytes()
+            ).hexdigest(),
+            "render_version": "notice-draft-v1",
+            "document_year": date.today().year,
+        }
+        fingerprint = hashlib.sha256(store.dumps(generation).encode()).hexdigest()
+        for existing in db.execute("SELECT payload FROM notices WHERE publication_id=?", (publication_id,)):
+            saved = json.loads(existing["payload"])
+            if saved.get("generation_fingerprint") == fingerprint:
+                return saved
         n = {
+            "generation_fingerprint": fingerprint,
+            "generation_context": generation,
             "id": store.uid(),
             "status": "draft_not_sent",
             "publication": publication_id,
@@ -833,7 +1230,7 @@ def notice(publication_id: int, request: Request):
         }
         raw = notice_docx(n, payload, settings)
         file_hash = hashlib.sha256(raw).hexdigest()
-        objects = store.DATA / "objects"
+        objects = store.data_dir() / "objects"
         objects.mkdir(exist_ok=True)
         (objects / (file_hash + ".docx")).write_bytes(raw)
         n["docx_sha256"] = file_hash
@@ -895,8 +1292,9 @@ def export():
     ledger_rows, issue_rows = [], []
     for pub in ledgers:
         p = pub["payload"]
-        automatic = all(methods.get(i) == "批量确认" for i in p["documents"])
-        ledger_rows.append(operations.ledger_row(pub, names, "自动通过" if automatic else "人工复核"))
+        labels = {operations.review_method_label(methods.get(i)) for i in p["documents"]}
+        method = next(iter(labels)) if len(labels) == 1 else "混合处理（详见合同记录）"
+        ledger_rows.append(operations.ledger_row(pub, names, method))
         key = names.get(p.get("latest_document"), p.get("latest_document"))
         for issue in p["issues"]:
             issue_rows.append(
@@ -911,8 +1309,9 @@ def export():
         z.writestr("待确认清单.csv", operations.csv_bytes(pending, ["档案号", "问题类型", "说明"]))
         z.writestr(
             "说明.txt",
-            "只导出已人工确认发布的材料。列名与练习集 08_标准答案 一致；“处理方式”按确认方式填写"
-            "（批量确认=自动通过，逐项核对=人工复核）。待确认清单为存疑待确认事项。\n",
+            "只导出已发布的材料，不含只读应缴试算。处理方式保留核验记录的真实身份；"
+            "测试代理模拟核验不代表人类确认。列名与练习集 08_标准答案 一致；"
+            "批量确认显示为自动通过，混合方式详见合同记录。待确认清单为存疑待确认事项。\n",
         )
     return Response(
         target.getvalue(),
@@ -926,9 +1325,9 @@ def backup(request: Request):
     who = actor(request, admin=True)
     from .maintenance import create_backup
 
-    base = Path(os.environ.get("FDE_BACKUP_DIR", store.DATA.parent / (store.DATA.name + "-backups")))
+    base = Path(os.environ.get("FDE_BACKUP_DIR", store.data_dir().parent / (store.data_dir().name + "-backups")))
     destination = base / ("backup-" + time.strftime("%Y%m%d-%H%M%S") + "-" + store.uid()[:6])
-    manifest = create_backup(store.DATA, destination, store.DB)
+    manifest = create_backup(store.data_dir(), destination, store.database_file())
     with store.connection() as db:
         store.audit(db, who, "backup", str(destination), {"files": len(manifest)})
     return {
@@ -940,13 +1339,13 @@ def backup(request: Request):
 
 def active_source():
     with store.connection() as db:
-        return rules.source_for(db, SOURCE)
+        return rules.source_for(db, source_data())
 
 
 @app.get("/api/rules")
 def read_rules():
     with store.connection() as db:
-        active = rules.source_for(db, SOURCE)
+        active = rules.source_for(db, source_data())
         history = [
             dict(r) for r in db.execute("SELECT id,created,actor,reason FROM rulesets ORDER BY created DESC")
         ]
@@ -954,13 +1353,15 @@ def read_rules():
         "active": active["rate_version"],
         "rates": active["rates"],
         "history": history,
-        "policy_version": "06-v1; rate-table changes only",
+        "policy_version": "06-v1; controlled-policy",
+        "policy": active.get("policy", rules.validate_policy()),
     }
 
 
-def rate_impact(db, rates):
-    current_source = rules.source_for(db, SOURCE)
-    new_source = {**current_source, "rates": rates, "rate_version": rules.digest(rates)}
+def rate_impact(db, rates, policy=None):
+    current_source = rules.source_for(db, source_data())
+    policy = rules.validate_policy(policy or current_source.get("policy"))
+    new_source = {**current_source, "rates": rates, "policy": policy, "rate_version": rules.digest({"rates": rates, "policy": policy})}
     impact = []
     for row in db.execute("SELECT id FROM parcels"):
         docs = [
@@ -987,7 +1388,7 @@ async def preview_rules(request: Request):
     try:
         rates = rules.validate(body.get("rates"))
         with store.connection() as db:
-            result, fingerprint = rate_impact(db, rates)
+            result, fingerprint = rate_impact(db, rates, body.get("policy"))
         return {**result, "draft_hash": fingerprint}
     except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(400, str(e)) from e
@@ -1005,13 +1406,14 @@ async def confirm_rules(request: Request):
         rates = rules.validate(body.get("rates"))
         with store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            result, fingerprint = rate_impact(db, rates)
+            result, fingerprint = rate_impact(db, rates, body.get("policy"))
             if fingerprint != body.get("draft_hash"):
                 raise HTTPException(409, "规则或台账已变化，请重新预览差异")
-            key = rules.digest(rates)
+            policy = rules.validate_policy(body.get("policy") or rules.source_for(db, source_data()).get("policy"))
+            key = rules.digest({"rates": rates, "policy": policy})
             db.execute(
                 "INSERT OR IGNORE INTO rulesets VALUES(?,?,?,?,?)",
-                (key, store.dumps(rates), time.time(), who, body["reason"][:1000]),
+                (key, store.dumps({"rates": rates, "policy": policy}), time.time(), who, body["reason"][:1000]),
             )
             db.execute("UPDATE settings SET value=? WHERE key='active_ruleset'", (key,))
             for change in result["impact"]:
@@ -1042,8 +1444,38 @@ def download_notice(identifier):
         raise HTTPException(404)
     n = json.loads(row[0])
     return FileResponse(
-        store.DATA / "objects" / (n["docx_sha256"] + ".docx"), filename="draft-notice-" + identifier + ".docx"
+        store.data_dir() / "objects" / (n["docx_sha256"] + ".docx"), filename="draft-notice-" + identifier + ".docx"
     )
+
+
+def tax_preview_data(year, quarter):
+    import openpyxl
+
+    from .outputs import tax_workbook
+    if not 1900 <= year <= 2100 or quarter not in (1, 2, 3, 4):
+        raise HTTPException(400, "无效年度或季度")
+    with store.connection() as db:
+        ledgers = operations.entries(db)
+        source = rules.source_for(db, source_data())
+        docs = [store.doc_row(r) for r in db.execute("SELECT * FROM documents WHERE state='published' ORDER BY id")]
+    raw, count = tax_workbook(ledgers, docs, source, year, quarter)
+    sheet = openpyxl.load_workbook(io.BytesIO(raw), data_only=True).active
+    values = list(sheet.values)
+    basis = {"year": year, "quarter": quarter, "ledgers": ledgers, "docs": docs, "source": source}
+    fingerprint = hashlib.sha256(store.dumps(basis).encode()).hexdigest()
+    return {"period": f"{year}年第{quarter}季度", "rows": count, "columns": [str(v or "") for v in values[0]],
+            "data": [[str(v or "") for v in row] for row in values[1:]], "preview_hash": fingerprint,
+            "note": "税务字段及本期应缴口径待主管部门确认；不对接税务系统"}, raw
+
+
+@app.post('/api/tax-preview')
+async def tax_preview(request: Request):
+    actor(request)
+    body = await request.json()
+    try:
+        return tax_preview_data(int(body['year']), int(body['quarter']))[0]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(400, "无效年度季度") from exc
 
 
 @app.post("/api/tax-push")
@@ -1051,23 +1483,25 @@ async def tax_push(request: Request):
     """生成并留存一期税务推送单（表2第7项：留存每次推送的内容）。不对接税务系统。"""
     who = actor(request)
     body = await request.json()
-    from .outputs import tax_workbook
-
     try:
         year, quarter = int(body.get("year", 2026)), int(body.get("quarter", 3))
-        with store.connection() as db:
-            ledgers = operations.entries(db)
-        raw, count = tax_workbook(
-            ledgers, [d for d in store.list_docs() if d["state"] == "published"], active_source(), year, quarter
-        )
+        preview, raw = tax_preview_data(year, quarter)
+        count = preview['rows']
+        if body.get('preview_hash') and body['preview_hash'] != preview['preview_hash']:
+            raise HTTPException(409, "税务来源已变化，请重新预览")
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e)) from e
     digest = hashlib.sha256(raw).hexdigest()
-    objects = store.DATA / "objects"
+    objects = store.data_dir() / "objects"
     objects.mkdir(exist_ok=True)
     (objects / (digest + ".xlsx")).write_bytes(raw)
     identifier = store.uid()
     with store.connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        current_preview, _ = tax_preview_data(year, quarter)
+        if current_preview["preview_hash"] != preview["preview_hash"]:
+            raise HTTPException(409, "来源已变化，请重新预览")
+        db.execute("INSERT INTO output_provenance VALUES(?,?)", (identifier, store.dumps(preview)))
         db.execute(
             "INSERT INTO tax_pushes(id,period,sha256,rows,created,actor) VALUES(?,?,?,?,?,?)",
             (identifier, f"{year}年第{quarter}季度", digest, count, time.time(), who),
@@ -1079,7 +1513,7 @@ async def tax_push(request: Request):
 @app.get("/api/tax-pushes")
 def tax_pushes():
     with store.connection() as db:
-        return [dict(r) for r in db.execute("SELECT * FROM tax_pushes ORDER BY created DESC")]
+        return [{**dict(r), "provenance": json.loads(meta[0]) if (meta := db.execute("SELECT payload FROM output_provenance WHERE id=?", (r["id"],)).fetchone()) else None} for r in db.execute("SELECT * FROM tax_pushes ORDER BY created DESC")]
 
 
 @app.get("/api/tax-push/{identifier}/document")
@@ -1089,7 +1523,7 @@ def tax_push_document(identifier: str):
     if not row:
         raise HTTPException(404)
     return FileResponse(
-        store.DATA / "objects" / (row["sha256"] + ".xlsx"),
+        store.data_dir() / "objects" / (row["sha256"] + ".xlsx"),
         filename=f"税务推送单-{row['period']}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
@@ -1097,7 +1531,7 @@ def tax_push_document(identifier: str):
 
 @app.post("/api/contracts/draft")
 async def contract_draft(request: Request):
-    """按制式模板生成新签/续期合同草稿并归档（表2第6项）。年租金由规则程序按现行计租标准计算。"""
+    """按制式模板保存待确认的新签/续期合同草稿（表2第6项）。年租金由规则程序按现行计租标准计算。"""
     who = actor(request)
     body = await request.json()
     from .domain import GRADES, USES, cents, dec, normalize_mode, to_upper_money
@@ -1110,11 +1544,16 @@ async def contract_draft(request: Request):
         parcel_id = follow_parcel(db, body.get("parcel_id"))
         latest = store.latest(db, parcel_id) if parcel_id else None
         if not latest or not latest["payload"].get("documents"):
-            raise HTTPException(404, "宗地没有已确认的台账")
-        p = latest["payload"]
-        base = store.doc_row(
-            db.execute("SELECT * FROM documents WHERE id=?", (p["latest_document"],)).fetchone()
-        )["review"]["fields"]
+            if kind != "新签":
+                raise HTTPException(404, "续期需要已确认的宗地台账")
+            base = body.get("fields") or {}
+            if any(not str(base.get(k, "")).strip() for k in ("tenant", "parcel_no", "address", "phone", "identity")):
+                raise HTTPException(400, "新宗地须填写承租人、证件、电话、宗地号与坐落")
+            parcel_id = "draft-" + store.uid()
+            p = {"recipient": base["tenant"], "phone": base["phone"], "address": base["address"], "ledger": {}}
+        else:
+            p = latest["payload"]
+            base = store.doc_row(db.execute("SELECT * FROM documents WHERE id=?", (p["latest_document"],)).fetchone())["review"]["fields"]
     f = {**base, **{k: v for k, v in (body.get("fields") or {}).items() if v not in (None, "")}}
     try:
         start = date.fromisoformat(body.get("start") or "")
@@ -1173,8 +1612,8 @@ async def contract_draft(request: Request):
     }
     raw = contract_docx(values, kind, base.get("contract_no") if kind == "续期" else None)
     digest = hashlib.sha256(raw).hexdigest()
-    (store.DATA / "objects").mkdir(exist_ok=True)
-    (store.DATA / "objects" / (digest + ".docx")).write_bytes(raw)
+    (store.data_dir() / "objects").mkdir(exist_ok=True)
+    (store.data_dir() / "objects" / (digest + ".docx")).write_bytes(raw)
     identifier = store.uid()
     with store.connection() as db:
         db.execute(
@@ -1183,7 +1622,8 @@ async def contract_draft(request: Request):
         )
         store.audit(db, who, "contract_draft", parcel_id, {"contract": identifier, "kind": kind})
     return {"id": identifier, "kind": kind, "values": values,
-            "note": "合同草稿已归档；签订后扫描件仍须按导入流程入库确认"}
+            "status": "pending_confirmation",
+            "note": "草稿已保存至合同确认，尚未归档；签订材料须上传核验后入账"}
 
 
 @app.get("/api/contracts/{identifier}/document")
@@ -1192,7 +1632,7 @@ def contract_document(identifier: str):
         row = db.execute("SELECT * FROM generated_contracts WHERE id=?", (identifier,)).fetchone()
     if not row:
         raise HTTPException(404)
-    return FileResponse(store.DATA / "objects" / (row["sha256"] + ".docx"), filename=f"{row['kind']}合同草稿-{identifier}.docx")
+    return FileResponse(store.data_dir() / "objects" / (row["sha256"] + ".docx"), filename=f"{row['kind']}合同草稿-{identifier}.docx")
 
 
 @app.post("/api/import-batch")
@@ -1329,7 +1769,12 @@ def original_file(identifier, unit_id):
 @app.get("/api/governance")
 def governance_queue():
     rows = []
-    for doc in store.list_docs():
+    documents = assessed_documents()
+    with store.connection() as db:
+        drafts = {r["document_id"]: json.loads(r["payload"]) for r in db.execute(
+            "SELECT d.document_id,d.payload FROM review_drafts d JOIN documents doc ON doc.id=d.document_id WHERE d.version=doc.version")}
+    priorities = review_assistance.prioritize(documents, drafts)
+    for doc in documents:
         if doc["state"] in {"published", "withdrawn"}:
             continue
         issues = governance.issues_for(doc)
@@ -1339,6 +1784,10 @@ def governance_queue():
                 "name": doc["name"],
                 "version": doc["version"],
                 "state": doc["state"],
+                "processing_state": doc.get('processing_state', doc['state']),
+                "confidence": doc.get('confidence'),
+                "review_priority": priorities.get(doc["id"], {}),
+                "completion_status": (doc.get("result") or {}).get("completion_status"),
                 "technical_status": (doc.get("intake") or {}).get("technical_status", "legacy"),
                 "material_status": "待核对完整性",
                 "business_status": "未确认",
@@ -1349,7 +1798,7 @@ def governance_queue():
                 ),
             }
         )
-    return rows
+    return sorted(rows, key=lambda r: (r["review_priority"].get("rank", 100), len(r["issues"]), r["name"]))
 
 
 @app.post("/api/documents/{identifier}/draft")
@@ -1365,6 +1814,8 @@ async def save_review_draft(identifier, request: Request):
         if doc["state"] in {"published", "withdrawn"}:
             raise HTTPException(409, "当前状态不可修改草稿")
         old = db.execute("SELECT payload FROM review_drafts WHERE document_id=?", (identifier,)).fetchone()
+        if old and "unresolved_fields" not in body:
+            body["unresolved_fields"] = json.loads(old[0]).get("unresolved_fields", [])
         db.execute(
             "INSERT INTO review_drafts VALUES(?,?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET version=excluded.version,payload=excluded.payload,actor=excluded.actor,at=excluded.at",
             (identifier, doc["version"], store.dumps(body), who, time.time()),
@@ -1392,7 +1843,7 @@ def follow_parcel(db, parcel_id):
 
 def parcel_context(db, fields, identifier, create=False):
     """Target parcel for a document: registry/cadastre key plus 原合同编号 links (续期、变更链)."""
-    key = parcel_key(fields, SOURCE)
+    key = parcel_key(fields, source_data())
     row = db.execute("SELECT id FROM parcels WHERE business_key=?", (key,)).fetchone()
     direct = follow_parcel(db, row[0]) if row else None
     linked = {follow_parcel(db, p) for p in linked_parcels(db, fields, exclude=identifier)}
@@ -1434,6 +1885,7 @@ def review_hash(doc, body, calculation):
             "stop",
             "uncertainty",
             "scenarios",
+            "alteration_review",
         )
     }
     binding = {
@@ -1467,7 +1919,7 @@ def attach_payloads(identifier, version, payloads, who, extra_audit=None):
     existing = {m["sha256"] for m in (doc.get("intake") or {}).get("files", [])}
     for name, raw in payloads:
         try:
-            units, manifest = intake.ingest(name, raw, store.DATA / "objects")
+            units, manifest = intake.ingest(name, raw, store.data_dir() / "objects")
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         if manifest["sha256"] not in existing:
@@ -1496,7 +1948,7 @@ def attach_payloads(identifier, version, payloads, who, extra_audit=None):
             "UPDATE documents SET pages=?,intake=?,digest=?,result=NULL,review=NULL,state='queued',version=version+1,updated=? WHERE id=?",
             (store.dumps(doc["pages"] + new_units), store.dumps(inventory), digest, time.time(), identifier),
         )
-        queue(db, identifier, fresh_budget=True)
+        queue(db, identifier, fresh_budget=True, who=who)
         store.audit(
             db,
             who,
@@ -1537,6 +1989,17 @@ async def merge_into(identifier, request: Request):
         db.execute(
             "UPDATE documents SET state='withdrawn',version=version+1,updated=? WHERE id=?", (time.time(), identifier)
         )
-        db.execute("UPDATE jobs SET state='cancelled' WHERE document_id=? AND state='queued'", (identifier,))
+        db.execute("UPDATE jobs SET state='cancelled' WHERE document_id=? AND state IN ('queued','fallback_queued')", (identifier,))
         store.audit(db, who, "merged_into", identifier, {"target": target, "reason": body.get("reason", "")})
     return {"target": target, **result}
+
+
+register_workbench(app, globals())
+
+from .templates import register as register_templates
+register_templates(app, actor)
+
+from .approval import register as register_approval
+register_approval(app, globals())
+
+register_demo(app, globals())
